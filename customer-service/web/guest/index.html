@@ -104,7 +104,13 @@
   const inputEl = document.getElementById('input')
   const sendEl = document.getElementById('send')
   const statusEl = document.getElementById('status')
-  let sessionId = null
+  let sessionId = localStorage.getItem('dshagent_session') || null
+
+  /** Persist the session id so a page refresh resumes the same conversation. */
+  function saveSession(id) {
+    sessionId = id
+    try { localStorage.setItem('dshagent_session', id) } catch { /* storage unavailable */ }
+  }
 
   /** Tiny HTML escaper (XSS-safe by default: text is never raw HTML). */
   const esc = s => String(s).replace(/[&<>"']/g, c => ({
@@ -233,9 +239,32 @@
     const res = await fetch('/api/guest/session', { method: 'POST' })
     if (!res.ok) throw new Error('create session failed')
     const data = await res.json()
-    sessionId = data.sessionId
+    saveSession(data.sessionId)
     statusEl.textContent = '在线'
     return sessionId
+  }
+
+  /** Restore a previous conversation (same browser, after refresh) from the server. */
+  async function restoreHistory() {
+    if (!sessionId) return
+    try {
+      const res = await fetch(`/api/guest/history?sessionId=${encodeURIComponent(sessionId)}`)
+      if (!res.ok) {
+        if (res.status === 404) { localStorage.removeItem('dshagent_session'); sessionId = null }
+        return
+      }
+      const data = await res.json()
+      const messages = data.messages || []
+      if (messages.length === 0) return
+      statusEl.textContent = '在线'
+      for (const m of messages) {
+        if (m.role === 'assistant') {
+          addMessage('assistant', renderMarkdown(m.text))
+        } else {
+          addMessage('user', renderMarkdown(m.text))
+        }
+      }
+    } catch { /* offline / server restarted: keep session id, chat will resume it */ }
   }
 
   /** Parse one SSE stream from a fetch Response, calling handlers per event. */
@@ -342,8 +371,10 @@
   })
   // Auto-grow input
   inputEl.addEventListener('input', () => { inputEl.style.height = 'auto'; inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px' })
-  // Create session eagerly
-  ensureSession().catch(() => { statusEl.textContent = '离线' })
+  // Restore the previous conversation on refresh, then ensure a live session.
+  restoreHistory().finally(() => {
+    ensureSession().catch(() => { statusEl.textContent = '离线' })
+  })
 })()
 </script>
 </body>

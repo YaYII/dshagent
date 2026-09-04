@@ -39,7 +39,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 /** Export shape expected of function plugins. */
 export const name = 'guest-server'
 /** Services this plugin registers against. */
-export const inject = ['webServer', 'agents', 'sessionQuery', 'agentDefaultModel', 'agentPresets']
+export const inject = ['webServer', 'agents', 'sessionQuery', 'sessionPersistence', 'agentDefaultModel', 'agentPresets']
 
 /** Guest-server configuration. */
 export interface Config {
@@ -180,8 +180,50 @@ export function apply(ctx: Context, config: Config): void {
     return { sessionId }
   }
 
+  /** Whether a caller-supplied id names a guest-owned session (defence against arbitrary session reads). */
+  const isGuestSessionId = (sessionId: string): boolean => /^guest-[0-9a-f-]{36}$/.test(sessionId)
+
+  /**
+   * Ensure a guest agent is live for `sessionId`, creating it on first sight
+   * or resuming it from persistence after a process restart (visitors keep
+   * their conversation across refreshes and server restarts).
+   */
+  const ensureGuest = async (sessionId: string): Promise<void> => {
+    if (guests.has(sessionId)) return
+    if (!isGuestSessionId(sessionId)) throw new Error('unknown session')
+    const selection = ctx.agentDefaultModel.currentSelection()
+    const resolved = (await ctx.agentPresets.resolve(config.preset)).id
+    let handle: { agent: unknown; dispose(): Promise<void> }
+    try {
+      // Live in this process already? Adopt it.
+      const live = ctx.agents.get(sessionId as never)
+      if (live !== undefined) {
+        handle = {
+          agent: live,
+          dispose: async () => { /* adopted: the original owner disposes */ },
+        }
+      } else {
+        handle = await ctx.agents.resume({
+          resumeSessionId: sessionId as never,
+          agentOptions: {
+            provider: selection.provider,
+            model: selection.model,
+            ...(selection.reasoningEffort === undefined ? {} : { reasoningEffort: selection.reasoningEffort }),
+          },
+          setup: async (agentCtx) => {
+            await ctx.agentPresets.mount(agentCtx, resolved)
+          },
+        })
+      }
+    } catch {
+      throw new Error('unknown session')
+    }
+    guests.set(sessionId, { sessionId, createdAt: Date.now(), dispose: () => handle.dispose() })
+  }
+
   /** Run one chat turn and return the assistant reply plus cited sources. */
   const runChat = async (sessionId: string, text: string): Promise<{ reply: string; sources: string[] }> => {
+    await ensureGuest(sessionId)
     const guest = guests.get(sessionId)
     if (guest === undefined) throw new Error('unknown session')
     const agent = ctx.agents.get(sessionId as never)
@@ -212,6 +254,7 @@ export function apply(ctx: Context, config: Config): void {
     text: string,
     onDelta: (delta: string) => void,
   ): Promise<{ reply: string; sources: string[] }> => {
+    await ensureGuest(sessionId)
     const guest = guests.get(sessionId)
     if (guest === undefined) throw new Error('unknown session')
     const agent = ctx.agents.get(sessionId as never)
@@ -282,6 +325,39 @@ export function apply(ctx: Context, config: Config): void {
     return out
   }
 
+  /**
+   * Read the guest conversation as a message list for refresh recovery:
+   * user messages and their assistant replies, in order, from the durable
+   * session log.
+   * @returns `[{ role: 'user'|'assistant', text }]` in chronological order.
+   */
+  const readHistory = async (sessionId: string): Promise<Array<{ role: string; text: string }>> => {
+    if (!isGuestSessionId(sessionId)) throw new Error('unknown session')
+    const snapshot = await ctx.sessionQuery.readSession(sessionId as never)
+    const events = (snapshot as unknown as { events: Array<Record<string, unknown>> }).events ?? []
+    const messages: Array<{ role: string; text: string }> = []
+    for (const ev of events) {
+      if (ev.type === 'user/message') {
+        const data = ev.data as { content?: Array<{ type?: string; text?: string }>; source?: { kind?: string } } | undefined
+        const isRuntime = data?.source?.kind === 'plugin' || data?.source?.kind === 'system'
+        if (isRuntime) continue // skip runtime-context injections
+        const text = (data?.content ?? [])
+          .filter(b => b.type === 'text' && typeof b.text === 'string')
+          .map(b => b.text as string)
+          .join('')
+        if (text.length > 0) messages.push({ role: 'user', text })
+      } else if (ev.type === 'assistant/message') {
+        const data = ev.data as { message?: { content?: Array<{ type?: string; text?: string }> } } | undefined
+        const text = (data?.message?.content ?? [])
+          .filter(b => b.type === 'text' && typeof b.text === 'string')
+          .map(b => b.text as string)
+          .join('')
+        if (text.length > 0) messages.push({ role: 'assistant', text })
+      }
+    }
+    return messages
+  }
+
   ctx.webServer.register({
     kind: 'prefix',
     path: '/api/guest',
@@ -296,6 +372,20 @@ export function apply(ctx: Context, config: Config): void {
         }
         if (req.method === 'POST' && path === '/api/guest/session') {
           sendJson(res, 201, await createGuest(ip))
+          return
+        }
+        if (req.method === 'GET' && path === '/api/guest/history') {
+          const sessionId = url.searchParams.get('sessionId') ?? ''
+          if (!isGuestSessionId(sessionId)) {
+            sendJson(res, 400, { error: 'invalid sessionId' })
+            return
+          }
+          try {
+            const messages = await readHistory(sessionId)
+            sendJson(res, 200, { sessionId, messages })
+          } catch {
+            sendJson(res, 404, { error: 'session not found' })
+          }
           return
         }
         if (req.method === 'POST' && path === '/api/guest/chat') {
