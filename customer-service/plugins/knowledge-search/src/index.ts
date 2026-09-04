@@ -42,6 +42,8 @@ export interface Config {
   excerptChars: number
   /** Directory-listing TTL in milliseconds; 0 disables caching. */
   listTtlMs: number
+  /** Hard cap of searches per agent turn (re-search loops are the main latency driver). */
+  maxSearchesPerTurn: number
 }
 
 /** Schemastery configuration. */
@@ -50,6 +52,7 @@ export const Config: z<Config> = z.object({
   maxResults: z.number().default(8),
   excerptChars: z.number().default(1200),
   listTtlMs: z.number().default(5000),
+  maxSearchesPerTurn: z.number().default(3),
 })
 
 /** One Markdown file discovered under the vault root. */
@@ -118,6 +121,60 @@ function excerpt(text: string, terms: Set<string>, maxChars: number): string {
   return `${prefix}${text.slice(start, end).replace(/\s+/g, ' ').trim()}${suffix}`
 }
 
+/**
+ * Section-level excerpt: split a Markdown file into `##`-headed sections and
+ * return the sections with the most query-term density, joined. This gives
+ * the model the COMPLETE relevant passages (FAQ items, news items…) instead
+ * of a fixed-width window, so it can answer from one search instead of
+ * re-searching for the rest of the section.
+ * @param content - full file text.
+ * @param terms - query terms.
+ * @param maxChars - total excerpt budget across the chosen sections.
+ * @returns up to ~maxChars of the most relevant complete sections.
+ */
+function sectionExcerpt(content: string, terms: Set<string>, maxChars: number): string {
+  const lines = content.split('\n')
+  const sections: Array<{ title: string; body: string[]; score: number }> = []
+  let current: { title: string; body: string[]; score: number } | undefined
+  const flush = (): void => {
+    if (current !== undefined && current.score > 0) sections.push(current)
+  }
+  for (const line of lines) {
+    const heading = /^##\s+(.*)$/.exec(line)
+    if (heading !== null) {
+      flush()
+      const title = heading[1]!.toLowerCase()
+      let score = 0
+      for (const term of terms) if (title.includes(term)) score += 4
+      current = { title: heading[1]!, body: [line], score }
+      continue
+    }
+    if (current === undefined) continue // ignore preamble before the first ##
+    current.body.push(line)
+    const lower = line.toLowerCase()
+    for (const term of terms) {
+      let at = 0
+      while ((at = lower.indexOf(term, at)) !== -1) {
+        current.score += term.length >= 2 ? 1 : 0.25
+        at += term.length
+      }
+    }
+  }
+  flush()
+  if (sections.length === 0) return excerpt(content, terms, maxChars) // unstructured file
+  sections.sort((a, b) => b.score - a.score)
+  const chosen: string[] = []
+  let total = 0
+  for (const section of sections) {
+    const text = section.body.join('\n').trim()
+    if (total + text.length > maxChars && chosen.length > 0) break
+    chosen.push(text)
+    total += text.length
+    if (total >= maxChars) break
+  }
+  return chosen.join('\n\n').slice(0, maxChars)
+}
+
 /** A knowledge-base scanner over one vault root. */
 export class VaultScanner {
   /** Cached file list generation. */
@@ -148,6 +205,9 @@ export class VaultScanner {
           continue
         }
         if (!entry.isFile() || !entry.name.toLowerCase().endsWith('.md')) continue
+        // Navigation/readme files are not knowledge content: exclude them so
+        // they never rank above real answers.
+        if (entry.name.toUpperCase() === 'README.MD') continue
         try {
           const info = await stat(abs)
           out.push({ rel: relative(this.root, abs).split('\\').join('/'), abs, size: info.size })
@@ -185,16 +245,20 @@ export class VaultScanner {
       const heading = /^#\s+([^\n]+)/m.exec(content)?.[1] ?? ''
       let score = 0
       for (const term of terms) {
-        if (titleMatch.includes(term)) score += 8
-        if (heading.toLowerCase().includes(term)) score += 5
+        if (titleMatch.includes(term)) score += 40
+        if (heading.toLowerCase().includes(term)) score += 20
       }
-      score += termFreq(content, terms)
+      // Body relevance = term density, not raw frequency: a dedicated FAQ
+      // file that mentions the terms densely must outrank a huge press
+      // archive that mentions them once per unrelated article.
+      const density = termFreq(content, terms) / Math.sqrt(Math.max(file.size, 1))
+      score += density * 60
       // A single stray 0.5-weight character hit is noise, not a match.
       if (score < 2) continue
       scored.push({
         path: file.rel,
         score,
-        excerpt: excerpt(content, terms, excerptChars),
+        excerpt: sectionExcerpt(content, terms, excerptChars),
         read: content,
       })
     }
@@ -205,10 +269,12 @@ export class VaultScanner {
 
 /** The model-facing tool description. */
 const DESCRIPTION = [
-  'Search the company knowledge base (an Obsidian vault of Markdown documents)',
-  'for the customer-service assistant. Use it BEFORE answering any question about',
-  'company facts, products, policies, pricing, procedures, or troubleshooting.',
-  'Returns ranked excerpts with source file paths; cite the source path in your answer.',
+  'Search the company knowledge base (Markdown documents) for customer-service answers.',
+  'STRATEGY: search at most 2 times per question. Craft ONE precise query covering the',
+  'whole question (include synonyms). After the first result, if the excerpts already',
+  'answer the question, STOP searching and answer immediately using them. Only search a',
+  'second time when the first result clearly lacks the answer. Never repeat a query you',
+  'already tried. Cite source file paths in your answer.',
 ].join(' ')
 
 /**
@@ -218,6 +284,8 @@ const DESCRIPTION = [
  */
 export function apply(ctx: Context, config: Config): void {
   const scanner = new VaultScanner(config.vaultRoot, config.listTtlMs)
+  /** Per-agent search counts within one turn (never cleared mid-turn; agents are per-session). */
+  const budget = new Map<string, number>()
   ctx.tools.register(defineTool({
     name: 'knowledge_search',
     description: DESCRIPTION,
@@ -248,6 +316,7 @@ export function apply(ctx: Context, config: Config): void {
             },
           },
           total: { type: 'integer', required: true },
+          note: { type: 'string' },
         },
       },
       render: (_args, value) => {
@@ -255,12 +324,33 @@ export function apply(ctx: Context, config: Config): void {
         const lines = total === 0
           ? ['No knowledge-base matches.']
           : value.hits.map((hit, i) => `[${i + 1}] ${hit.path} (score ${hit.score})\n${hit.excerpt}`)
-        return [{ type: 'text', text: `Knowledge base (${total} hit${total === 1 ? '' : 's'}):\n${lines.join('\n\n')}` }]
+        const note = value.note === undefined || value.note === ''
+          ? ''
+          : `\nNOTE: ${value.note}`
+        return [{ type: 'text', text: `Knowledge base (${total} hit${total === 1 ? '' : 's'}):\n${lines.join('\n\n')}${note}` }]
       },
     },
-    async execute(args) {
+    async execute(args, exec) {
       const query = String(args.query ?? '').trim()
       if (query === '') return { query, hits: [], total: 0 }
+      // Per-turn search budget: repeated searches are the main latency driver
+      // (the model re-queries with synonyms when excerpts are thin). Enforce a
+      // hard cap keyed by the owning agent so one question cannot trigger a
+      // dozen scans; beyond the cap the model must answer from what it has.
+      const owner = (exec as { agent?: { id?: unknown } }).agent
+      if (owner !== undefined) {
+        const key = String(owner.id)
+        const used = budget.get(key) ?? 0
+        if (used >= config.maxSearchesPerTurn) {
+          return {
+            query,
+            hits: [],
+            total: -1,
+            note: `search budget exhausted (${config.maxSearchesPerTurn}); answer from the excerpts already returned`,
+          }
+        }
+        budget.set(key, used + 1)
+      }
       const hits = await scanner.search(query, config.maxResults, config.excerptChars)
       return { query, hits, total: hits.length }
     },
