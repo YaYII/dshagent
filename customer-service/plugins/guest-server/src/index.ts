@@ -47,10 +47,8 @@ export interface Config {
   preset: string
   /** Workspace (cwd) for guest sessions; the persona's {{cwd}} and sandbox anchor. */
   workspace: string
-  /** Per-IP rate-limit window in milliseconds. */
-  rateLimitWindowMs: number
-  /** Max session creates per IP per window. */
-  sessionRatePerWindow: number
+  /** Process-wide ceiling of live guest sessions (memory guard). */
+  maxSessions: number
   /** Window (ms) in which repeated identical messages count as spam. */
   spamWindowMs: number
   /** Identical messages within spamWindowMs that trigger a block. */
@@ -63,28 +61,11 @@ export interface Config {
 export const Config: z<Config> = z.object({
   preset: z.string().default('customer-service-guest'),
   workspace: z.string().default('/kb'),
-  rateLimitWindowMs: z.number().default(60_000),
-  sessionRatePerWindow: z.number().default(5),
+  maxSessions: z.number().default(500),
   spamWindowMs: z.number().default(30_000),
   spamRepeat: z.number().default(3),
   blockMs: z.number().default(60_000),
 })
-
-/** Sliding-window per-IP accounting. */
-class RateLimiter {
-  private readonly hits = new Map<string, number[]>()
-  constructor(private readonly windowMs: number, private readonly limit: number) {}
-
-  /** Whether `ip` may make another request now; records the hit when allowed. */
-  allow(ip: string, now = Date.now()): boolean {
-    const cutoff = now - this.windowMs
-    const list = (this.hits.get(ip) ?? []).filter(t => t > cutoff)
-    if (list.length >= this.limit) return false
-    list.push(now)
-    this.hits.set(ip, list)
-    return true
-  }
-}
 
 /**
  * Abuse guard: attack-aware admission. Unlike a plain rate limiter it does
@@ -218,16 +199,17 @@ function clientIp(req: IncomingMessage): string {
  * @param config - validated {@link Config}.
  */
 export function apply(ctx: Context, config: Config): void {
-  const sessions = new RateLimiter(config.rateLimitWindowMs, config.sessionRatePerWindow)
   const guard = new AttackGuard(config.spamWindowMs, config.spamRepeat, config.blockMs)
 
   /**
-   * Attack-aware admission for one chat request. Returns a response body when
-   * the request must be refused (attack-blocked or over the rate limit), or
-   * null when it may proceed. Normal varied questions are never refused here.
+   * Attack-aware admission for one chat request, keyed by the SESSION (one
+   * person's conversation) rather than the IP: shared/public IPs must never
+   * punish individual users, and one person's repeated abuse must not leak
+   * onto others behind the same address. Returns a response body when the
+   * request must be refused, or null when it may proceed.
    */
-  const chatAdmission = (ip: string, message: string): { status: number; body: unknown } | null => {
-    const verdict = guard.check(ip, message)
+  const chatAdmission = (sessionId: string, message: string): { status: number; body: unknown } | null => {
+    const verdict = guard.check(sessionId, message)
     if (!verdict.allowed) {
       const seconds = Math.max(1, Math.ceil(verdict.remainingMs / 1000))
       const text = verdict.reason === 'abusive'
@@ -257,11 +239,14 @@ export function apply(ctx: Context, config: Config): void {
     await guest.dispose()
   }
 
-  /** Create a fresh guest session, rate-limited. */
-  const createGuest = async (ip: string): Promise<{ sessionId: string }> => {
-    if (!sessions.allow(ip)) {
-      const error = new Error('rate limit exceeded: too many sessions, slow down')
-      ;(error as Error & { statusCode?: number }).statusCode = 429
+  /** Create a fresh guest session. */
+  const createGuest = async (): Promise<{ sessionId: string }> => {
+    // No per-IP limits: a session is one person's conversation and an IP
+    // must not be used to judge people. A process-wide ceiling still guards
+    // memory (each session owns an agent) without singling anyone out.
+    if (guests.size >= config.maxSessions) {
+      const error = new Error('service busy: too many concurrent conversations, please try later')
+      ;(error as Error & { statusCode?: number }).statusCode = 503
       throw error
     }
     const sessionId = `guest-${randomUUID()}`
@@ -486,7 +471,7 @@ export function apply(ctx: Context, config: Config): void {
           return
         }
         if (req.method === 'POST' && path === '/api/guest/session') {
-          sendJson(res, 201, await createGuest(ip))
+          sendJson(res, 201, await createGuest())
           return
         }
         if (req.method === 'GET' && path === '/api/guest/history') {
@@ -517,7 +502,7 @@ export function apply(ctx: Context, config: Config): void {
             sendJson(res, 400, { error: 'sessionId and message (non-empty string) are required' })
             return
           }
-          const admission = chatAdmission(ip, message)
+          const admission = chatAdmission(sessionId, message)
           if (admission !== null) {
             sendJson(res, admission.status, admission.body)
             return
@@ -547,7 +532,7 @@ export function apply(ctx: Context, config: Config): void {
             sendJson(res, 400, { error: 'sessionId and message (non-empty string) are required' })
             return
           }
-          const admission = chatAdmission(ip, message)
+          const admission = chatAdmission(sessionId, message)
           if (admission !== null) {
             sendJson(res, admission.status, admission.body)
             return
