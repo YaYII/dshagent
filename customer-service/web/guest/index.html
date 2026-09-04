@@ -80,6 +80,19 @@
   #send:disabled { opacity: .5; cursor: default; }
   #welcome { text-align: center; color: var(--muted); margin: auto; }
   #welcome h2 { color: var(--text); margin-bottom: 8px; font-size: 20px; }
+  #welcome .suggestions {
+    margin-top: 22px; display: flex; flex-wrap: wrap; gap: 10px;
+    justify-content: center;
+  }
+  #welcome .suggestions .sug {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 999px;
+    padding: 8px 18px; font-size: 13.5px; color: var(--text); cursor: pointer;
+    transition: all .15s ease; user-select: none;
+  }
+  #welcome .suggestions .sug:hover {
+    border-color: var(--brand); color: var(--brand); background: var(--brand-weak);
+    transform: translateY(-1px);
+  }
   #restoring { text-align: center; color: var(--muted); margin: auto; display: flex; flex-direction: column; align-items: center; gap: 12px; }
   #restoring p { font-size: 14px; }
   .spinner {
@@ -116,6 +129,7 @@
   <div id="welcome">
     <h2 data-i18n="welcomeTitle">您好，我是智能客服助手 👋</h2>
     <p data-i18n="welcomeBody">我可以回答关于产品、政策、价格等问题。请问有什么可以帮您？</p>
+    <div id="suggestions" class="suggestions"></div>
   </div>
   <!-- 刷新后恢复历史期间的加载动画 -->
   <div id="restoring" hidden>
@@ -150,6 +164,8 @@
       errorGeneric: '抱歉，出了点问题：',
       userLabel: '我',
       aiLabel: 'AI',
+      // 建议问题（欢迎页快捷提问），点击即发送
+      suggestions: ['客服热线是多少？', '如何缴交电费？', '遇到停电怎么办？', '电动车如何充电？'],
     },
     en: {
       appTitle: 'Customer Service',
@@ -165,6 +181,7 @@
       errorGeneric: 'Sorry, something went wrong: ',
       userLabel: 'You',
       aiLabel: 'AI',
+      suggestions: ['What is the customer service hotline?', 'How can I pay my electricity bill?', 'What should I do during a power outage?', 'How do I charge my electric vehicle?'],
     },
     pt: {
       appTitle: 'Apoio ao Cliente',
@@ -180,6 +197,7 @@
       errorGeneric: 'Desculpe, ocorreu um erro: ',
       userLabel: 'Eu',
       aiLabel: 'IA',
+      suggestions: ['Qual é a linha de apoio ao cliente?', 'Como posso pagar a conta de eletricidade?', 'O que fazer durante uma falha de energia?', 'Como carrego o meu veículo elétrico?'],
     },
   }
 
@@ -213,6 +231,27 @@
     if (titleEl) titleEl.textContent = t('appTitle')
   }
   applyI18n()
+
+  /** Render the welcome-page suggested questions (click to ask). */
+  function renderSuggestions() {
+    const box = document.getElementById('suggestions')
+    if (!box) return
+    const items = dict.suggestions ?? []
+    box.innerHTML = ''
+    for (const q of items) {
+      const chip = document.createElement('button')
+      chip.type = 'button'
+      chip.className = 'sug'
+      chip.textContent = q
+      chip.addEventListener('click', () => {
+        // Ask the question immediately: fill the composer and send.
+        inputEl.value = q
+        send()
+      })
+      box.appendChild(chip)
+    }
+  }
+  renderSuggestions()
 
   const chatEl = document.getElementById('chat')
   const welcomeEl = document.getElementById('welcome')
