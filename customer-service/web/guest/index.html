@@ -11,6 +11,7 @@
     --user-bubble: #2563eb; --user-text: #fff; --assistant-bubble: #ffffff;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
+  [hidden] { display: none !important; }
   html, body { height: 100%; }
   body {
     font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
@@ -73,6 +74,15 @@
   #send:disabled { opacity: .5; cursor: default; }
   #welcome { text-align: center; color: var(--muted); margin: auto; }
   #welcome h2 { color: var(--text); margin-bottom: 8px; font-size: 20px; }
+  #restoring { text-align: center; color: var(--muted); margin: auto; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  #restoring p { font-size: 14px; }
+  .spinner {
+    width: 34px; height: 34px; border-radius: 50%;
+    border: 3px solid var(--brand-weak);
+    border-top-color: var(--brand);
+    animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
   .typing::after { content: "…"; animation: dots 1.2s infinite; }
   @keyframes dots { 0% { content: ""; } 33% { content: "."; } 66% { content: ".."; } 100% { content: "..."; } }
 </style>
@@ -88,6 +98,11 @@
   <div id="welcome">
     <h2>您好，我是智能客服助手 👋</h2>
     <p>我可以回答关于产品、政策、价格等问题。请问有什么可以帮您？</p>
+  </div>
+  <!-- 刷新后恢复历史期间的加载动画 -->
+  <div id="restoring" hidden>
+    <div class="spinner" aria-hidden="true"></div>
+    <p>正在恢复对话记录…</p>
   </div>
 </div>
 
@@ -211,7 +226,9 @@
   }
 
   function addMessage(role, html, sources) {
-    welcomeEl && welcomeEl.remove()
+    if (welcomeEl) welcomeEl.hidden = true
+    const restoring = document.getElementById('restoring')
+    if (restoring) restoring.hidden = true
     const msg = document.createElement('div')
     msg.className = `msg ${role}`
     const avatar = document.createElement('div')
@@ -247,10 +264,19 @@
   /** Restore a previous conversation (same browser, after refresh) from the server. */
   async function restoreHistory() {
     if (!sessionId) return
+    // Show a restoring animation while history loads so the visitor is not
+    // staring at a blank chat during the fetch.
+    const restoringEl = document.getElementById('restoring')
+    welcomeEl.hidden = true
+    restoringEl.hidden = false
     try {
       const res = await fetch(`/api/guest/history?sessionId=${encodeURIComponent(sessionId)}`)
       if (!res.ok) {
-        if (res.status === 404) { localStorage.removeItem('dshagent_session'); sessionId = null }
+        if (res.status === 404) {
+          // Server no longer knows this session: start fresh.
+          localStorage.removeItem('dshagent_session')
+          sessionId = null
+        }
         return
       }
       const data = await res.json()
@@ -265,6 +291,13 @@
         }
       }
     } catch { /* offline / server restarted: keep session id, chat will resume it */ }
+    finally {
+      // addMessage removes welcome; if nothing was restored, show the
+      // welcome hero again.
+      restoringEl.hidden = true
+      const hasMessages = chatEl.querySelector('.msg') !== null
+      if (!hasMessages) welcomeEl.hidden = false
+    }
   }
 
   /** Parse one SSE stream from a fetch Response, calling handlers per event. */
