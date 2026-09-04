@@ -1,14 +1,16 @@
 # dshagent 客服系统 — docker compose
 #
 # 单机部署：一个 dsh-agent 服务容器（官方内核 + 客服 preset + guest 桥）
-# + 一个 nginx 入口容器（/ = 游客聊天，/admin = 管理端）。
+# + 一个 nginx 入口容器。游客与 Admin 走**两个独立端口**：
+#   :10800 = Guest 游客对话页（静态 + /api/guest）
+#   :10801 = Admin 管理端（官方 DSH Web GUI，token 见 dsh 日志）
 # Obsidian 知识库 vault 目录只读挂载为 /kb，编辑 vault 即更新客服知识。
 #
 # 使用：
-#   cp .env.example .env   # 填 AGENTROUTER_API_KEY 等模型 key
+#   cp .env.example .env   # 填模型 API key
 #   docker compose up -d --build
 #   访问 http://<host>:10800/        （游客端）
-#   访问 http://<host>:10800/admin/  （管理端，token 见 dsh 日志）
+#   访问 http://<host>:10801/        （管理端）
 
 services:
   dsh-agent:
@@ -36,7 +38,10 @@ services:
       retries: 5
       start_period: 60s
     ports:
-      - "${HTTP_PORT:-10800}:8080"
+      # 游客端口（nginx :8080）与 Admin 端口（nginx :8081）都在 dsh-agent
+      # 的 netns 上发布（nginx 是 network_mode: service:dsh-agent）。
+      - "${GUEST_PORT:-10800}:8080"
+      - "${ADMIN_PORT:-10801}:8081"
     restart: unless-stopped
     networks:
       - dshagent

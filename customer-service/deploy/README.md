@@ -1,25 +1,27 @@
 # dshagent 客服系统 — 部署
 
 Docker 单机部署：一个 `dsh-agent` 服务（DeepSeek Harness 官方内核 + 客服
-preset + guest HTTP 桥）+ 一个 `nginx` 入口。对外一个端口，两个交互窗口：
+preset + guest HTTP 桥）+ 一个 `nginx` 入口。**两个独立端口、两个交互窗口**：
 
-| 入口 | 面向 | 说明 |
+| 端口 | 面向 | 说明 |
 |---|---|---|
-| `/` | 游客 | 智能客服对话页：匿名问答，回答可渲染 Markdown/表格/条形图/图片 |
-| `/admin` | 管理员 | 官方 DSH Web GUI：配置 AI 模型/provider、查看会话、插件管理 |
+| `10800`（游客） | 游客 | 智能客服对话页：匿名问答，回答可渲染 Markdown/表格/条形图/图片 |
+| `10801`（Admin） | 管理员 | 官方 DSH Web GUI：配置 AI 模型/provider、查看会话、插件管理 |
+
+> 端口可用环境变量覆盖：`GUEST_PORT` / `ADMIN_PORT`（默认 10800 / 10801）。
 
 ## 快速开始
 
 ```bash
 cd customer-service/deploy
-cp .env.example .env          # 填写 AGENTROUTER_API_KEY（或改用其它 provider）
+cp .env.example .env          # 填写模型 API key（默认 commandcode，CMD_API_KEY_2）
 mkdir -p kb                   # 客服知识库目录（Obsidian vault 文件夹）
 # 把 Obsidian vault 内容放进 kb/（或把 KB_VAULT_DIR 指向真实 vault 路径）
 docker compose up -d --build
 ```
 
 - 游客端：`http://<host>:10800/`
-- 管理端：`http://<host>:10800/admin/`（首次访问按 dsh web 的 token 握手；
+- 管理端：`http://<host>:10801/`（首次访问按 dsh web 的 token 握手；
   管理 token 打印在 `docker compose logs dsh-agent` 启动行）
 
 ## 知识库（Obsidian）
@@ -32,9 +34,9 @@ docker compose up -d --build
 
 ## AI 模型配置
 
-- 开箱默认路由 `agentrouter`（OpenAI 兼容网关），key 从 `.env` 的
-  `AGENTROUTER_API_KEY` 注入（profile 静态 provider，见
-  `customer-service/deploy/profile/cordis.patch.yml`）。
+- 开箱默认路由 `commandcode`（公网 OpenAI 兼容端点），key 从 `.env` 的
+  `CMD_API_KEY_2` 注入（profile 静态 provider 含 commandcode/agentrouter/
+  noocool 多个可选，见 `customer-service/deploy/profile/cordis.patch.yml`）。
 - 管理端「设置 → 模型」可继续添加/切换其它 OpenAI 兼容 provider（写
   DSH_HOME 持久卷 settings.yaml），客服会话默认路由跟随。
 - ⚠️ **模型网关必须容器可达**：dsh web 绑容器内回环（官方安全设计），
@@ -49,10 +51,10 @@ docker compose up -d --build
 - `dsh-home` 卷持久化 settings/credentials/sessions（`docker compose down`
   不丢；`down -v` 清空）。
 - dsh web 只绑容器内 `127.0.0.1:3080`（官方安全设计拒绝 0.0.0.0），对外
-  仅 nginx 10800。
+  仅 nginx 的 10800（游客）与 10801（Admin）两个端口。
 - 游客会话使用独立瘦身 preset（customer-service-guest）：只读知识库检索 +
   对话，无任何 shell/文件/网络/管理能力；guest API 自带按 IP 限流。
-- 生产建议：nginx 前置 TLS（反代到 10800），Admin 面加访问控制（IP 白名单
+- 生产建议：nginx 前置 TLS，Admin 端口（10801）加访问控制（IP 白名单
   或基础认证）。
 
 ## 本地开发（不构建镜像）

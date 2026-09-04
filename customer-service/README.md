@@ -6,7 +6,7 @@
 - **Guest 游客端**：纯聊天对话页 —— 匿名问答、自带限流；回答由知识库驱动并可
   渲染 Markdown / 表格 / 条形图 / 图片，客服可附带来源引用。
 - **知识库**：Obsidian vault 目录只读挂载，编辑 vault 即更新客服知识。
-- **部署**：Docker compose 单机运行（dsh-agent + nginx 双入口）。
+- **部署**：Docker compose 单机运行（dsh-agent + nginx）；游客与 Admin 分占两个端口。
 
 ## 快速开始
 
@@ -14,7 +14,7 @@
 cd customer-service/deploy
 cp .env.example .env        # 填 AGENTROUTER_API_KEY
 docker compose up -d --build
-# 游客端 http://<host>:10800/    管理端 http://<host>:10800/admin/
+# 游客端 http://<host>:10800/    管理端 http://<host>:10801/
 ```
 
 详见 [deploy/README.md](deploy/README.md)。
@@ -22,8 +22,8 @@ docker compose up -d --build
 ## 架构
 
 ```
-                    对外 nginx :10800
-              / (游客)                /admin (管理端)
+               对外 nginx :10800 / :10801
+            :10800 (游客)            :10801 (Admin)
                  │                        │
      Guest 前端(静态)             官方 DSH Web GUI
         │  /api/guest/*                 │
