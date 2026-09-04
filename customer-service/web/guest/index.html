@@ -46,6 +46,12 @@
   }
   .msg.user .bubble { background: var(--user-bubble); color: var(--user-text); border-top-right-radius: 2px; }
   .msg.assistant .bubble { background: var(--assistant-bubble); border: 1px solid var(--border); border-top-left-radius: 2px; }
+  .msg.notice { align-self: center; max-width: 90%; }
+  .msg.notice .bubble {
+    background: #fef9e7; border: 1px solid #f5e6b8; color: #8a6d1a;
+    font-size: 12.5px; padding: 6px 12px; border-radius: 10px;
+    text-align: center;
+  }
   .bubble p { margin: 0 0 8px; } .bubble p:last-child { margin-bottom: 0; }
   .bubble ul, .bubble ol { margin: 4px 0 8px 18px; }
   .bubble code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
@@ -393,7 +399,17 @@
       let done = false
       let streamError = null
       await consumeSse(res, (event, data) => {
-        if (event === 'delta' && typeof data.text === 'string') {
+        if (event === 'notice' && typeof data.text === 'string') {
+          // Friendly reminder from the moderation layer (first-offence
+          // warning): shown above the reply, never blocks the answer.
+          const tip = document.createElement('div')
+          tip.className = 'msg notice'
+          const tipBubble = document.createElement('div')
+          tipBubble.className = 'bubble'
+          tipBubble.textContent = data.text
+          tip.appendChild(tipBubble)
+          chatEl.insertBefore(tip, bubbleHost)
+        } else if (event === 'delta' && typeof data.text === 'string') {
           const first = streamed === ''
           streamed += data.text
           if (first) showStreamed()

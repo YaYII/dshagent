@@ -68,19 +68,17 @@ export const Config: z<Config> = z.object({
 })
 
 /**
- * Abuse guard: attack-aware admission. Unlike a plain rate limiter it does
- * NOT block normal conversational traffic — only behaviour that looks like an
- * attack gets a calm-down block:
- *  1. REPEATED SPAM: the same (or near-identical) message sent several times
- *     within a short window (a script hammering one question).
- *  2. ABUSIVE CONTENT: messages that are pure abuse / attacks (profanity,
- *     insults, harassment), judged from the message text.
- * On detection the offending IP is blocked for `blockMs` (60s) with a polite
- * "please calm down" response. Normal varied questions are never blocked by
- * this guard regardless of how many are asked.
+ * Abuse guard: two-stage, human-style moderation per conversation.
+ *   Stage 1 (WARN): a first abusive/repeated-spam message is NOT blocked —
+ *   the user is politely reminded and the reply still goes through.
+ *   Stage 2 (BLOCK): if the same kind of misbehaviour continues (a second
+ *   abusive message, or spam repeats past the threshold), the conversation is
+ *   blocked for `blockMs` (60s) with a calm-down notice.
+ * Judgement keys on the conversation (session), never on the IP.
  */
 class AttackGuard {
   private readonly recent = new Map<string, Array<{ text: string; at: number }>>()
+  private readonly warned = new Map<string, Set<string>>()
   private readonly blockedUntil = new Map<string, number>()
   constructor(
     private readonly spamWindowMs: number,
@@ -100,10 +98,7 @@ class AttackGuard {
       'fuck', 'shit', 'bitch', 'asshole', 'stupid', 'idiot', '笨蛋', '白痴', '傻逼', '你妈', '去死',
       '垃圾客服', '废物', '操你', '妈的', '混蛋', '王八蛋', '贱人', '神经病',
     ]
-    // A message that is mostly abuse (short + contains several) or one clean hit with nothing else
     if (abusive.some(w => lower.includes(w))) {
-      // Pure abuse (short, no real question words) is an attack; a long
-      // message that merely contains a swear word still gets served.
       const len = text.length
       const hits = abusive.filter(w => lower.includes(w)).length
       return len <= 60 || hits >= 2
@@ -112,40 +107,56 @@ class AttackGuard {
   }
 
   /**
-   * Decide admission for one chat message from `ip`.
-   * @returns `{ allowed: true }` or `{ allowed: false, remainingMs, reason }`
-   * when the ip is blocked or this message triggers a block.
+   * Decide admission for one chat message of a conversation.
+   * @returns
+   *   - `{ kind: 'ok' }` — proceed normally.
+   *   - `{ kind: 'warn', reason }` — proceed, but attach a friendly reminder
+   *     (first offence is tolerated with a nudge; no blocking yet).
+   *   - `{ kind: 'block', reason, remainingMs }` — conversation blocked for
+   *     the cool-down because the user continued after the warning.
    */
-  check(ip: string, message: string, now = Date.now()): { allowed: boolean; remainingMs: number; reason?: string } {
-    const blocked = this.blockedUntil.get(ip)
+  check(key: string, message: string, now = Date.now()): { kind: 'ok' } | { kind: 'warn'; reason: string } | { kind: 'block'; reason: string; remainingMs: number } {
+    const blocked = this.blockedUntil.get(key)
     if (blocked !== undefined) {
       const remainingMs = blocked - now
-      if (remainingMs > 0) return { allowed: false, remainingMs, reason: 'blocked' }
-      this.blockedUntil.delete(ip)
+      if (remainingMs > 0) return { kind: 'block', reason: 'blocked', remainingMs }
+      this.blockedUntil.delete(key)
     }
 
-    if (AttackGuard.isAbusive(message)) {
-      this.blockedUntil.set(ip, now + this.blockMs)
-      return { allowed: false, remainingMs: this.blockMs, reason: 'abusive' }
-    }
-
-    // Repeated-spam detection: identical messages in the window.
-    const cutoff = now - this.spamWindowMs
-    const list = (this.recent.get(ip) ?? []).filter(e => e.at > cutoff)
-    const norm = AttackGuard.norm(message)
-    if (norm !== '') {
+    const kind = (): 'abusive' | 'spam' | undefined => {
+      if (AttackGuard.isAbusive(message)) return 'abusive'
+      // Repeated identical messages in the window.
+      const cutoff = now - this.spamWindowMs
+      const list = (this.recent.get(key) ?? []).filter(e => e.at > cutoff)
+      const norm = AttackGuard.norm(message)
+      if (norm === '') return undefined
       const same = list.filter(e => AttackGuard.norm(e.text) === norm).length
       list.push({ text: message, at: now })
-      this.recent.set(ip, list)
-      // spamRepeat identical messages in the window triggers a block:
-      // this message counts as one (same earlier + this one >= spamRepeat).
-      if (same + 1 >= this.spamRepeat) {
-        this.blockedUntil.set(ip, now + this.blockMs)
-        this.recent.delete(ip)
-        return { allowed: false, remainingMs: this.blockMs, reason: 'spam' }
-      }
+      this.recent.set(key, list)
+      if (same + 1 >= this.spamRepeat) return 'spam'
+      return undefined
     }
-    return { allowed: true, remainingMs: 0 }
+
+    const reason = kind()
+    if (reason === undefined) {
+      // Well-behaved message clears any prior warning state.
+      this.warned.delete(key)
+      return { kind: 'ok' }
+    }
+
+    // Already warned for this kind of behaviour? Block now.
+    const offences = this.warned.get(key)
+    if (offences !== undefined && offences.has(reason)) {
+      this.blockedUntil.set(key, now + this.blockMs)
+      this.warned.delete(key)
+      this.recent.delete(key)
+      return { kind: 'block', reason, remainingMs: this.blockMs }
+    }
+    // First offence: record the warning and let the message through.
+    const next = offences ?? new Set<string>()
+    next.add(reason)
+    this.warned.set(key, next)
+    return { kind: 'warn', reason }
   }
 }
 
@@ -202,20 +213,24 @@ export function apply(ctx: Context, config: Config): void {
   const guard = new AttackGuard(config.spamWindowMs, config.spamRepeat, config.blockMs)
 
   /**
-   * Attack-aware admission for one chat request, keyed by the SESSION (one
-   * person's conversation) rather than the IP: shared/public IPs must never
-   * punish individual users, and one person's repeated abuse must not leak
-   * onto others behind the same address. Returns a response body when the
-   * request must be refused, or null when it may proceed.
+   * Two-stage, attack-aware admission for one chat request, keyed by the
+   * SESSION (one person's conversation), never the IP.
+   * @returns `{ kind: 'block', status, body }` — refuse with a calm-down
+   * notice (second offence); `{ kind: 'warn', notice }` — allow the request
+   * but surface a friendly reminder (first offence); `null` — proceed freely.
    */
-  const chatAdmission = (sessionId: string, message: string): { status: number; body: unknown } | null => {
+  const chatAdmission = (sessionId: string, message: string):
+    | { kind: 'block'; status: number; body: unknown }
+    | { kind: 'warn'; notice: string }
+    | null => {
     const verdict = guard.check(sessionId, message)
-    if (!verdict.allowed) {
+    if (verdict.kind === 'block') {
       const seconds = Math.max(1, Math.ceil(verdict.remainingMs / 1000))
       const text = verdict.reason === 'abusive'
-        ? '请文明用语，我们很乐意帮助您解决问题。为保障交流环境，请约 1 分钟后再继续咨询，谢谢配合。'
-        : '我们检测到您可能在短时间内重复发送相同内容。为保障服务质量，请先冷静一下，约 1 分钟后再继续咨询，谢谢理解。'
+        ? '很抱歉，为保障交流环境，请文明用语。系统将在约 1 分钟后为您恢复服务，请稍后再试，谢谢配合。'
+        : '很抱歉，我们检测到您短时间内重复发送相同内容。为保障服务质量，请先冷静一下，约 1 分钟后再继续咨询，谢谢理解。'
       return {
+        kind: 'block',
         status: 429,
         body: {
           error: 'request blocked',
@@ -225,8 +240,14 @@ export function apply(ctx: Context, config: Config): void {
         },
       }
     }
+    if (verdict.kind === 'warn') {
+      const notice = verdict.reason === 'abusive'
+        ? '温馨提示：请文明用语，我们很乐意帮您解决问题 😊'
+        : '温馨提示：您刚才发送了重复的内容，若继续重复发送将需要稍作休息哦 😊'
+      return { kind: 'warn', notice }
+    }
     // No fixed per-window chat quota: normal users may ask as many varied
-    // questions as they like; only the attack guard above blocks abuse.
+    // questions as they like; only repeated abuse blocks.
     return null
   }
   const guests = new Map<string, GuestSession>()
@@ -503,13 +524,17 @@ export function apply(ctx: Context, config: Config): void {
             return
           }
           const admission = chatAdmission(sessionId, message)
-          if (admission !== null) {
+          if (admission !== null && admission.kind === 'block') {
             sendJson(res, admission.status, admission.body)
             return
           }
           try {
             const result = await runChat(sessionId, message)
-            sendJson(res, 200, result)
+            if (admission !== null && admission.kind === 'warn') {
+              sendJson(res, 200, { ...result, notice: admission.notice })
+            } else {
+              sendJson(res, 200, result)
+            }
           } catch (error) {
             sendJson(res, 500, { error: error instanceof Error ? error.message : 'turn failed' })
           }
@@ -533,10 +558,11 @@ export function apply(ctx: Context, config: Config): void {
             return
           }
           const admission = chatAdmission(sessionId, message)
-          if (admission !== null) {
+          if (admission !== null && admission.kind === 'block') {
             sendJson(res, admission.status, admission.body)
             return
           }
+          const warnNotice = admission !== null && admission.kind === 'warn' ? admission.notice : null
           res.writeHead(200, {
             'content-type': 'text/event-stream; charset=utf-8',
             'cache-control': 'no-store',
@@ -547,6 +573,7 @@ export function apply(ctx: Context, config: Config): void {
             res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
           }
           sendEvent('meta', { sessionId })
+          if (warnNotice !== null) sendEvent('notice', { text: warnNotice })
           try {
             const result = await runChatStream(sessionId, message, (delta) => {
               sendEvent('delta', { text: delta })
