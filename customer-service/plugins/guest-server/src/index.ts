@@ -51,8 +51,12 @@ export interface Config {
   rateLimitWindowMs: number
   /** Max session creates per IP per window. */
   sessionRatePerWindow: number
-  /** Max chat requests per IP per window. */
-  chatRatePerWindow: number
+  /** Window (ms) in which repeated identical messages count as spam. */
+  spamWindowMs: number
+  /** Identical messages within spamWindowMs that trigger a block. */
+  spamRepeat: number
+  /** Block duration in ms after an attack is detected (cool-down). */
+  blockMs: number
 }
 
 /** Schemastery configuration. */
@@ -61,7 +65,9 @@ export const Config: z<Config> = z.object({
   workspace: z.string().default('/kb'),
   rateLimitWindowMs: z.number().default(60_000),
   sessionRatePerWindow: z.number().default(5),
-  chatRatePerWindow: z.number().default(20),
+  spamWindowMs: z.number().default(30_000),
+  spamRepeat: z.number().default(3),
+  blockMs: z.number().default(60_000),
 })
 
 /** Sliding-window per-IP accounting. */
@@ -77,6 +83,88 @@ class RateLimiter {
     list.push(now)
     this.hits.set(ip, list)
     return true
+  }
+}
+
+/**
+ * Abuse guard: attack-aware admission. Unlike a plain rate limiter it does
+ * NOT block normal conversational traffic — only behaviour that looks like an
+ * attack gets a calm-down block:
+ *  1. REPEATED SPAM: the same (or near-identical) message sent several times
+ *     within a short window (a script hammering one question).
+ *  2. ABUSIVE CONTENT: messages that are pure abuse / attacks (profanity,
+ *     insults, harassment), judged from the message text.
+ * On detection the offending IP is blocked for `blockMs` (60s) with a polite
+ * "please calm down" response. Normal varied questions are never blocked by
+ * this guard regardless of how many are asked.
+ */
+class AttackGuard {
+  private readonly recent = new Map<string, Array<{ text: string; at: number }>>()
+  private readonly blockedUntil = new Map<string, number>()
+  constructor(
+    private readonly spamWindowMs: number,
+    private readonly spamRepeat: number,
+    private readonly blockMs: number,
+  ) {}
+
+  /** Roughly normalise a message for duplicate detection (lowercase, collapse spaces). */
+  private static norm(text: string): string {
+    return text.toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 200)
+  }
+
+  /** Whether the text is abusive/attack content (profanity/insults in zh/en). */
+  private static isAbusive(text: string): boolean {
+    const lower = text.toLowerCase()
+    const abusive = [
+      'fuck', 'shit', 'bitch', 'asshole', 'stupid', 'idiot', '笨蛋', '白痴', '傻逼', '你妈', '去死',
+      '垃圾客服', '废物', '操你', '妈的', '混蛋', '王八蛋', '贱人', '神经病',
+    ]
+    // A message that is mostly abuse (short + contains several) or one clean hit with nothing else
+    if (abusive.some(w => lower.includes(w))) {
+      // Pure abuse (short, no real question words) is an attack; a long
+      // message that merely contains a swear word still gets served.
+      const len = text.length
+      const hits = abusive.filter(w => lower.includes(w)).length
+      return len <= 60 || hits >= 2
+    }
+    return false
+  }
+
+  /**
+   * Decide admission for one chat message from `ip`.
+   * @returns `{ allowed: true }` or `{ allowed: false, remainingMs, reason }`
+   * when the ip is blocked or this message triggers a block.
+   */
+  check(ip: string, message: string, now = Date.now()): { allowed: boolean; remainingMs: number; reason?: string } {
+    const blocked = this.blockedUntil.get(ip)
+    if (blocked !== undefined) {
+      const remainingMs = blocked - now
+      if (remainingMs > 0) return { allowed: false, remainingMs, reason: 'blocked' }
+      this.blockedUntil.delete(ip)
+    }
+
+    if (AttackGuard.isAbusive(message)) {
+      this.blockedUntil.set(ip, now + this.blockMs)
+      return { allowed: false, remainingMs: this.blockMs, reason: 'abusive' }
+    }
+
+    // Repeated-spam detection: identical messages in the window.
+    const cutoff = now - this.spamWindowMs
+    const list = (this.recent.get(ip) ?? []).filter(e => e.at > cutoff)
+    const norm = AttackGuard.norm(message)
+    if (norm !== '') {
+      const same = list.filter(e => AttackGuard.norm(e.text) === norm).length
+      list.push({ text: message, at: now })
+      this.recent.set(ip, list)
+      // spamRepeat identical messages in the window triggers a block:
+      // this message counts as one (same earlier + this one >= spamRepeat).
+      if (same + 1 >= this.spamRepeat) {
+        this.blockedUntil.set(ip, now + this.blockMs)
+        this.recent.delete(ip)
+        return { allowed: false, remainingMs: this.blockMs, reason: 'spam' }
+      }
+    }
+    return { allowed: true, remainingMs: 0 }
   }
 }
 
@@ -131,7 +219,34 @@ function clientIp(req: IncomingMessage): string {
  */
 export function apply(ctx: Context, config: Config): void {
   const sessions = new RateLimiter(config.rateLimitWindowMs, config.sessionRatePerWindow)
-  const chats = new RateLimiter(config.rateLimitWindowMs, config.chatRatePerWindow)
+  const guard = new AttackGuard(config.spamWindowMs, config.spamRepeat, config.blockMs)
+
+  /**
+   * Attack-aware admission for one chat request. Returns a response body when
+   * the request must be refused (attack-blocked or over the rate limit), or
+   * null when it may proceed. Normal varied questions are never refused here.
+   */
+  const chatAdmission = (ip: string, message: string): { status: number; body: unknown } | null => {
+    const verdict = guard.check(ip, message)
+    if (!verdict.allowed) {
+      const seconds = Math.max(1, Math.ceil(verdict.remainingMs / 1000))
+      const text = verdict.reason === 'abusive'
+        ? '请文明用语，我们很乐意帮助您解决问题。为保障交流环境，请约 1 分钟后再继续咨询，谢谢配合。'
+        : '我们检测到您可能在短时间内重复发送相同内容。为保障服务质量，请先冷静一下，约 1 分钟后再继续咨询，谢谢理解。'
+      return {
+        status: 429,
+        body: {
+          error: 'request blocked',
+          blocked: true,
+          retryAfterSec: seconds,
+          message: text,
+        },
+      }
+    }
+    // No fixed per-window chat quota: normal users may ask as many varied
+    // questions as they like; only the attack guard above blocks abuse.
+    return null
+  }
   const guests = new Map<string, GuestSession>()
 
   /** Drop a guest session (agent + map entry). */
@@ -402,8 +517,9 @@ export function apply(ctx: Context, config: Config): void {
             sendJson(res, 400, { error: 'sessionId and message (non-empty string) are required' })
             return
           }
-          if (!chats.allow(ip)) {
-            sendJson(res, 429, { error: 'rate limit exceeded' })
+          const admission = chatAdmission(ip, message)
+          if (admission !== null) {
+            sendJson(res, admission.status, admission.body)
             return
           }
           try {
@@ -431,8 +547,9 @@ export function apply(ctx: Context, config: Config): void {
             sendJson(res, 400, { error: 'sessionId and message (non-empty string) are required' })
             return
           }
-          if (!chats.allow(ip)) {
-            sendJson(res, 429, { error: 'rate limit exceeded' })
+          const admission = chatAdmission(ip, message)
+          if (admission !== null) {
+            sendJson(res, admission.status, admission.body)
             return
           }
           res.writeHead(200, {
