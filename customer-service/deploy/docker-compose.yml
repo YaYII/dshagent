@@ -7,8 +7,8 @@
 # 使用：
 #   cp .env.example .env   # 填 AGENTROUTER_API_KEY 等模型 key
 #   docker compose up -d --build
-#   访问 http://<host>:8080/        （游客端）
-#   访问 http://<host>:8080/admin/  （管理端，token 见 dsh 日志）
+#   访问 http://<host>:10800/        （游客端）
+#   访问 http://<host>:10800/admin/  （管理端，token 见 dsh 日志）
 
 services:
   dsh-agent:
@@ -36,7 +36,7 @@ services:
       retries: 5
       start_period: 60s
     ports:
-      - "${HTTP_PORT:-8080}:8080"
+      - "${HTTP_PORT:-10800}:8080"
     restart: unless-stopped
     networks:
       - dshagent

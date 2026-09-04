@@ -18,8 +18,8 @@ mkdir -p kb                   # 客服知识库目录（Obsidian vault 文件夹
 docker compose up -d --build
 ```
 
-- 游客端：`http://<host>:8080/`
-- 管理端：`http://<host>:8080/admin/`（首次访问按 dsh web 的 token 握手；
+- 游客端：`http://<host>:10800/`
+- 管理端：`http://<host>:10800/admin/`（首次访问按 dsh web 的 token 握手；
   管理 token 打印在 `docker compose logs dsh-agent` 启动行）
 
 ## 知识库（Obsidian）
@@ -49,10 +49,10 @@ docker compose up -d --build
 - `dsh-home` 卷持久化 settings/credentials/sessions（`docker compose down`
   不丢；`down -v` 清空）。
 - dsh web 只绑容器内 `127.0.0.1:3080`（官方安全设计拒绝 0.0.0.0），对外
-  仅 nginx 8080。
+  仅 nginx 10800。
 - 游客会话使用独立瘦身 preset（customer-service-guest）：只读知识库检索 +
   对话，无任何 shell/文件/网络/管理能力；guest API 自带按 IP 限流。
-- 生产建议：nginx 前置 TLS（反代到 8080），Admin 面加访问控制（IP 白名单
+- 生产建议：nginx 前置 TLS（反代到 10800），Admin 面加访问控制（IP 白名单
   或基础认证）。
 
 ## 本地开发（不构建镜像）

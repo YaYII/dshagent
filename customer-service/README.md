@@ -14,7 +14,7 @@
 cd customer-service/deploy
 cp .env.example .env        # 填 AGENTROUTER_API_KEY
 docker compose up -d --build
-# 游客端 http://<host>:8080/    管理端 http://<host>:8080/admin/
+# 游客端 http://<host>:10800/    管理端 http://<host>:10800/admin/
 ```
 
 详见 [deploy/README.md](deploy/README.md)。
@@ -22,7 +22,7 @@ docker compose up -d --build
 ## 架构
 
 ```
-                    对外 nginx :8080
+                    对外 nginx :10800
               / (游客)                /admin (管理端)
                  │                        │
      Guest 前端(静态)             官方 DSH Web GUI

@@ -30,7 +30,7 @@
 cd customer-service/deploy
 cp .env.example .env     # 填 CMD_API_KEY_2（或改 profile 用你的 provider）
 docker compose up -d --build
-# 游客端 http://<host>:8080/     管理端 http://<host>:8080/admin/
+# 游客端 http://<host>:10800/     管理端 http://<host>:10800/admin/
 ```
 
 知识库：把 Obsidian vault 目录（或任意 Markdown 知识文件夹）作为

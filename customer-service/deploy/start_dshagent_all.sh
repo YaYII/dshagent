@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ============================================================
 # start_dshagent_all — 启动 dshagent 智能客服系统（Docker 一键）
-#   游客端   http://127.0.0.1:8080/
-#   Admin 端 http://127.0.0.1:8080/admin/
+#   游客端   http://127.0.0.1:10800/
+#   Admin 端 http://127.0.0.1:10800/admin/
 # 管理 token 见容器日志：docker compose logs dsh-agent（启动行 ?token=...）
 # ============================================================
 set -uo pipefail
@@ -47,7 +47,7 @@ echo ""
 echo "[3/3] 等待服务就绪（健康检查）..."
 READY=0
 for i in $(seq 1 40); do
-  if curl -s -o /dev/null "http://127.0.0.1:${HTTP_PORT:-8080}/api/guest/health" 2>/dev/null; then
+  if curl -s -o /dev/null "http://127.0.0.1:${HTTP_PORT:-10800}/api/guest/health" 2>/dev/null; then
     READY=1; break
   fi
   sleep 3
@@ -57,8 +57,8 @@ echo "=============================================="
 if [ "$READY" = "1" ]; then
   echo "  ✅ dshagent 客服系统已就绪"
   echo ""
-  echo "  🌐 游客端（智能客服对话）: http://127.0.0.1:${HTTP_PORT:-8080}/"
-  echo "  🔐 Admin 管理端         : http://127.0.0.1:${HTTP_PORT:-8080}/admin/"
+  echo "  🌐 游客端（智能客服对话）: http://127.0.0.1:${HTTP_PORT:-10800}/"
+  echo "  🔐 Admin 管理端         : http://127.0.0.1:${HTTP_PORT:-10800}/admin/"
   echo ""
   echo "  管理 token 查看: cd $DEPLOY_DIR && docker compose logs dsh-agent | grep -o 'token=[A-Za-z0-9_-]*' | tail -1"
 else
