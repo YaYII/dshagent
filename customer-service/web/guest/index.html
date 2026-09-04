@@ -121,6 +121,15 @@
   const statusEl = document.getElementById('status')
   let sessionId = localStorage.getItem('dshagent_session') || null
 
+  // API base: when served behind a reverse-proxy path prefix (e.g.
+  // https://host/dshagent/), the guest API lives under the same prefix
+  // (/dshagent/api/guest/*). Derive it from the page URL so both direct
+  // (http://127.0.0.1:10800/) and proxied deployments work unchanged.
+  const pagePath = window.location.pathname
+  const API_BASE = pagePath.endsWith('/')
+    ? pagePath.replace(/\/+$/, '')
+    : pagePath.replace(/\/[^/]*$/, '')
+
   /** Persist the session id so a page refresh resumes the same conversation. */
   function saveSession(id) {
     sessionId = id
@@ -253,7 +262,7 @@
   async function ensureSession() {
     if (sessionId) return sessionId
     statusEl.textContent = '连接中…'
-    const res = await fetch('/api/guest/session', { method: 'POST' })
+    const res = await fetch(`${API_BASE}/api/guest/session`, { method: 'POST' })
     if (!res.ok) throw new Error('create session failed')
     const data = await res.json()
     saveSession(data.sessionId)
@@ -270,7 +279,7 @@
     welcomeEl.hidden = true
     restoringEl.hidden = false
     try {
-      const res = await fetch(`/api/guest/history?sessionId=${encodeURIComponent(sessionId)}`)
+      const res = await fetch(`${API_BASE}/api/guest/history?sessionId=${encodeURIComponent(sessionId)}`)
       if (!res.ok) {
         if (res.status === 404) {
           // Server no longer knows this session: start fresh.
@@ -352,7 +361,7 @@
     let streamed = ''
     try {
       const id = await ensureSession()
-      const res = await fetch('/api/guest/chat/stream', {
+      const res = await fetch(`${API_BASE}/api/guest/chat/stream`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ sessionId: id, message: text }),
