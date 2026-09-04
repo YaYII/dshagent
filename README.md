@@ -1,63 +1,52 @@
-# DeepSeek Harness
+# dshagent — 智能客服系统
 
-English | [中文](README.zh.md)
+基于 [DeepSeek Harness](README.harness.md)（`dsh`，全插件化 Agent 运行时）改造的
+**Docker 化智能客服系统**。内核与会话引擎照用 DeepSeek Harness，客服会话的
+能力被收窄为「问答 + 知识库 + API」——**不是编码 Agent，没有任何终端/代码
+执行能力**。
 
-DeepSeek Harness (`dsh`) is an open-source agent harness developed by [DeepSeek AI](https://deepseek.com).
+## 两个交互窗口
 
-It is built on an **everything-is-a-plugin** architecture and powered by [Cordis](https://github.com/cordiverse/cordis), whose design is described in [_A Programming Paradigm for Spatiotemporal Composability_](https://arxiv.org/abs/2608.25512).
+| 入口 | 面向 | 说明 |
+|---|---|---|
+| `/` | **游客** | 智能客服对话页：匿名问答、按 IP 限流；回答可渲染 Markdown / 表格 / 条形图 / 图片，可带知识库来源引用 |
+| `/admin` | **管理员** | 官方 DSH Web GUI：配置 AI 模型/provider/key、查看会话、管理知识库 |
 
-Documentation: [https://deepseek-harness.github.io/deepseek-harness/](https://deepseek-harness.github.io/deepseek-harness/)
+## 客服能力模型
 
-## Developer preview
+| 能力 | 工具 | Admin 客服 | 游客 |
+|---|---|---|---|
+| 回答问题 | 对话 | ✅ | ✅ |
+| 检索知识库（Obsidian vault） | `knowledge_search` | ✅ | ✅ |
+| 调用外部 API 取数（订单/产品/价格…） | `api_get`（白名单） | ✅ | ✅ |
+| 把结果/案例写回知识库 | `kb_write` | ✅ | ⛔ |
+| 渲染图表/图片辅助解释 | 前端富渲染 | ✅ | ✅ |
 
-DeepSeek Harness is in _developer preview_ and iterating rapidly. **THERE WILL BE COMPATIBILITY-BREAKING CHANGES.**
+**永不提供**：shell/终端、文件系统（除经 kb_write 写 vault）、子代理、代码执行、网页浏览。
 
-Review the [safety notice](SAFETY.md) before running the project.
+## 快速开始（Docker）
 
-## Run
-
-### Run from `npm`
-
-Install `Node.js`, then run:
-
-```sh
-npx @deepseek-ai/dsh web
+```bash
+cd customer-service/deploy
+cp .env.example .env     # 填 CMD_API_KEY_2（或改 profile 用你的 provider）
+docker compose up -d --build
+# 游客端 http://<host>:8080/     管理端 http://<host>:8080/admin/
 ```
 
-The command starts the Web UI at `http://127.0.0.1:3080` by default and opens it in the default browser for a local launch. An SSH launch only prints the host URL because the SSH client or editor owns the local forwarded address. Pass `--no-open` to run the server without opening a browser. See [Web UI guide](docs/user/guide/index.md).
+知识库：把 Obsidian vault 目录（或任意 Markdown 知识文件夹）作为
+`KB_VAULT_DIR`（默认 `./kb`）挂进容器 `/kb`，编辑即更新客服知识。
 
-### Run from source
+详见 [customer-service/README.md](customer-service/README.md) 与
+[customer-service/deploy/README.md](customer-service/deploy/README.md)。
 
-To run from a repository checkout:
+## 目录
 
-```sh
-git clone https://github.com/deepseek-ai/deepseek-harness.git
-cd deepseek-harness
-pnpm install
-pnpm run build
-pnpm dsh web
-```
+- `customer-service/` — 客服系统全部改造（设计、preset、插件、前端、部署）
+  - `design.md` 改造设计 · `CHANGES.md` 裁剪与能力说明
+  - `presets/` 客服/游客 preset · `plugins/` 检索/API/游客桥插件
+  - `web/guest/` 游客前端 · `deploy/` Docker/compose/nginx/profile
+- 其余为 DeepSeek Harness 官方源码（内核，构建必需；README.harness.md 是上游说明）
 
-`pnpm run build` prepares the repository artifacts. `pnpm dsh web` uses those built artifacts without rebuilding.
+## 授权
 
-## Community and support
-
-- Submit feedback or bug reports through [GitHub Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions).
-- Add the [`dsh-plugin`](https://github.com/topics/dsh-plugin) topic to your plugin repository for discoverability.
-- Join <a href="https://discord.gg/Ycq5dCaS4">DeepSeek Harness Discord community</a>.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Development
-
-Start with the [development guide](docs/development.md) and [architecture documentation](docs/architecture.md).
-
-For agents, follow [AGENTS.md](AGENTS.md).
-
-## License
-
-[MIT](LICENSE)
-
-Third-party dependencies and their licenses are disclosed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+DeepSeek Harness 上游为 MIT（见 [LICENSE](LICENSE)）；本仓库在其上叠加客服改造。
