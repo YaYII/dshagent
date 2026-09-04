@@ -24,7 +24,7 @@
  * @module customer-service/api-client
  */
 
-import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { readFile, writeFile, appendFile, mkdir } from 'node:fs/promises'
 import { join, normalize, relative, resolve, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
@@ -37,12 +37,23 @@ export const inject = ['tools']
 
 /** api-client configuration. */
 export interface Config {
-  /** Knowledge base (vault) root; kb_write writes under this directory. */
+  /** Knowledge base (vault) root; kb_write/kb_append write under this directory. */
   vaultRoot: string
   /** Allowed URL prefixes for api_get (e.g. https://api.example.com/). */
   apiAllowlist: string[]
   /** Whether kb_write is registered at all (staff presets only). */
   enableWrite: boolean
+  /**
+   * Writable directory for kb_append (unanswered-questions collection).
+   * The vault root itself stays read-only; this lives on the DSH_HOME volume
+   * so the team can review and fold entries into the knowledge base.
+   */
+  appendDir: string
+  /**
+   * File names (relative to appendDir) kb_append may append to (guest
+   * "unanswered questions" collection). Empty disables kb_append.
+   */
+  appendPaths: string[]
   /** Max response bytes api_get accepts. */
   maxResponseBytes: number
   /** Request timeout ms. */
@@ -56,6 +67,8 @@ export const Config: z<Config> = z.object({
   vaultRoot: z.string().required(),
   apiAllowlist: z.array(z.string()).default([]),
   enableWrite: z.boolean().default(false),
+  appendDir: z.string().default('/dsh-home/unanswered'),
+  appendPaths: z.array(z.string()).default([]),
   maxResponseBytes: z.number().default(256 * 1024),
   timeoutMs: z.number().default(30_000),
   allowOverwrite: z.boolean().default(false),
@@ -64,16 +77,16 @@ export const Config: z<Config> = z.object({
 /** A safe JSON value for the tool output. */
 type Json = Record<string, unknown>
 
-/** Resolve a vault-relative note path and refuse traversal outside the root. */
-function resolveNotePath(vaultRoot: string, rel: string): string {
+/** Resolve a root-relative note path and refuse traversal outside the root. */
+function resolveNotePath(root: string, rel: string): string {
   const clean = rel.replace(/\\/g, '/').replace(/^\/+/, '')
   if (clean === '' || !clean.endsWith('.md')) {
-    throw new Error('kb_write path must be a relative Markdown path ending in .md')
+    throw new Error('note path must be a relative Markdown path ending in .md')
   }
-  const abs = resolve(vaultRoot, clean)
-  const root = resolve(vaultRoot)
-  if (abs !== root && !abs.startsWith(root + sep)) {
-    throw new Error('kb_write path escapes the knowledge base root')
+  const abs = resolve(root, clean)
+  const resolvedRoot = resolve(root)
+  if (abs !== resolvedRoot && !abs.startsWith(resolvedRoot + sep)) {
+    throw new Error('note path escapes its root directory')
   }
   return abs
 }
@@ -149,6 +162,63 @@ export function apply(ctx: Context, config: Config): void {
     },
   }))
 
+  // kb_append: line-append to allow-listed collection files only. This is the
+  // guest-safe "record what I could not answer" channel: guests may never
+  // create/overwrite arbitrary notes, only append one line to files the
+  // deployment explicitly allows (e.g. 待补充问题.md).
+  if (config.appendPaths.length === 0) return
+
+  ctx.tools.register(defineTool({
+    name: 'kb_append',
+    description: [
+      'Append one line to a knowledge-base collection file (used to record',
+      'questions you could not answer so the team can enrich the knowledge base).',
+      'Only pre-allowed files can be appended; provide the exact vault-relative',
+      'path and one line of text. Never invent an answer after appending.',
+    ].join(' '),
+    parameters: {
+      path: {
+        type: 'string',
+        required: true,
+        description: 'Vault-relative path from the allowed list (e.g. 待补充问题.md).',
+      },
+      line: {
+        type: 'string',
+        required: true,
+        description: 'One line to append (the unanswerable question).',
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          path: { type: 'string', required: true },
+          bytes: { type: 'integer', required: true },
+        },
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: `kb_append: recorded in ${value.path} (${value.bytes} bytes)`,
+      }],
+    },
+    async execute(args) {
+      const rel = String(args.path ?? '')
+      const line = String(args.line ?? '').trim()
+      const allowed = config.appendPaths.includes(rel)
+      if (!allowed) throw new Error(`kb_append: ${rel} is not an allowed collection file`)
+      if (line === '') throw new Error('kb_append: line must not be empty')
+      // The collection lives in the writable appendDir (DSH_HOME volume),
+      // never inside the read-only vault.
+      const abs = resolveNotePath(config.appendDir, rel)
+      await mkdir(resolve(abs, '..'), { recursive: true })
+      const stamp = new Date().toISOString().slice(0, 10)
+      const entry = `- ${line}（${stamp}）\n`
+      await appendFile(abs, entry, 'utf8')
+      const relPath = relative(config.appendDir, abs).split(sep).join('/')
+      return { path: relPath, bytes: Buffer.byteLength(entry) }
+    },
+  }))
   // kb_write is staff-only: guests must never mutate the knowledge base.
   if (!config.enableWrite) return
 

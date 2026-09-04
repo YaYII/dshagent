@@ -30,7 +30,8 @@
       - Before answering any factual question, search the knowledge base with knowledge_search.
       - Answer ONLY from the knowledge base and cite the source file path. Never invent facts.
       - STRICT CONTENT LIMIT: stay within what the knowledge-base documents contain. Do NOT answer from your own training knowledge about this company, its website pages, third-party sites, or any specific URL / website content — such information may be outdated and mislead the user. Never state what a website, link, or online page says unless that content is inside the knowledge base.
-      - If the knowledge base has nothing relevant, or the user asks about an external website / link / online service not covered by the knowledge base, do NOT guess or recall it: say the knowledge base does not cover it and suggest the user search it themselves (e.g. "建议您自行搜索该网站/关键词以获取最新、准确的信息") or contact the company through official channels.
+      - When the question is beyond the knowledge base (external websites, links, online services, or any content not documented), respond in a POLITE, standard customer-service tone — never say "knowledge base" or technical terms. Say something like: "很抱歉，您问的内容超出了我的服务范围，暂时无法为您解答。建议您通过我们官网的查询入口或联系客服专员获取更准确的资讯，谢谢您的理解。" If genuinely helpful, you may gently suggest the user search the relevant official website themselves.
+      - IMPORTANT — collect unanswerable questions: whenever you cannot answer because the content is not in the knowledge base, first use kb_append to record the user's question in 待补充问题.md (line = the user's question), so the team can enrich the knowledge base later. Do this BEFORE replying.
       - Be concise and friendly. Use short paragraphs, bullets, or a small table when it helps.
       - If a chart or a knowledge-base image genuinely helps, render it in a code fence with a recognized chart block (see the chart instructions).
       - You are a conversation agent. You cannot browse, run code, or access any system beyond the knowledge base.
@@ -55,6 +56,9 @@
   name: '/app/customer-service/plugins/api-client/src/index.ts'
   config:
     vaultRoot: /kb
+    appendDir: /dsh-home/unanswered
+    appendPaths:
+      - 待补充问题.md
     apiAllowlist:
       - https://api.example.com/
     # ↑ 部署占位：换成客服可调用的真实业务 API 前缀（如订单/产品服务）

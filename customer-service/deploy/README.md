@@ -93,3 +93,18 @@ customer-service/
     ├── profile/               # 客服 profile 组合（bundles + patch）
     └── .env.example           # 环境变量示例
 ```
+
+## 待补充问题（客服知识增强闭环）
+
+客服无法回答的问题会自动收录到容器 `/dsh-home/unanswered/待补充问题.md`
+（DSH_HOME 卷，`docker compose down` 不丢）：
+
+```bash
+# 查看待补充问题
+docker exec dshagent-app cat /dsh-home/unanswered/待补充问题.md
+# 或直接看卷目录
+sudo ls /var/lib/docker/volumes/deploy_dsh-home/_data/unanswered/
+```
+
+团队定期查看该文件，把高频问题整理成 Markdown 放入知识库 `kb/`（或挂载的
+vault），客服能力即不断增强——"越用越聪明"闭环。
