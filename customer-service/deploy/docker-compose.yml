@@ -1,0 +1,66 @@
+# dshagent 客服系统 — docker compose
+#
+# 单机部署：一个 dsh-agent 服务容器（官方内核 + 客服 preset + guest 桥）
+# + 一个 nginx 入口容器（/ = 游客聊天，/admin = 管理端）。
+# Obsidian 知识库 vault 目录只读挂载为 /kb，编辑 vault 即更新客服知识。
+#
+# 使用：
+#   cp .env.example .env   # 填 AGENTROUTER_API_KEY 等模型 key
+#   docker compose up -d --build
+#   访问 http://<host>:8080/        （游客端）
+#   访问 http://<host>:8080/admin/  （管理端，token 见 dsh 日志）
+
+services:
+  dsh-agent:
+    build:
+      context: ../..
+      dockerfile: customer-service/deploy/Dockerfile
+    container_name: dshagent-app
+    env_file: .env
+    environment:
+      DSH_HOME: /dsh-home
+      # 模型路由静态配置（profile patch 读此 env 注入 llm-pi-ai provider）
+      AGENTROUTER_API_KEY: ${AGENTROUTER_API_KEY:-}
+      CMD_API_KEY: ${CMD_API_KEY:-}
+      CMD_API_KEY_2: ${CMD_API_KEY_2:-}
+      NOOCOOL_API_KEY: ${NOOCOOL_API_KEY:-}
+    volumes:
+      # 客服知识库（Obsidian vault 目录，只读）
+      - ${KB_VAULT_DIR:-./kb}:/kb:ro
+      # DSH 持久化数据（settings/credentials/sessions/…）
+      - dsh-home:/dsh-home
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3080/api/guest/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    ports:
+      - "${HTTP_PORT:-8080}:8080"
+    restart: unless-stopped
+    networks:
+      - dshagent
+    extra_hosts:
+      # 让容器内 profile 的 agentrouter baseURL（host.docker.internal:8787）
+      # 能访问宿主机上运行的 AgentRouter 网关
+      - "host.docker.internal:host-gateway"
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: dshagent-nginx
+    depends_on:
+      - dsh-agent
+    # 共享 dsh-agent 的网络命名空间：dsh web 只绑容器内 127.0.0.1:3080
+    # （官方安全设计拒绝 0.0.0.0），nginx 与 dsh 同 netns 才能反代到它。
+    network_mode: "service:dsh-agent"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../web/guest:/srv/guest:ro
+    restart: unless-stopped
+
+volumes:
+  dsh-home:
+
+networks:
+  dshagent:
+    driver: bridge

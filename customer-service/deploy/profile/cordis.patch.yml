@@ -1,0 +1,99 @@
+# dshagent 客服系统 — 客服 profile 组合层
+#
+# 叠加在官方 bundle 层之上（@deepseek-ai/dsh-base → @deepseek-ai/dsh-web-app）。
+# 裁剪策略：本 profile 不装任何第三方业务 bundle（agiteam/任务板/团队编排/
+# Office/PPT/搜索等），只保留官方内核 + Web GUI。第三方裁剪 = profile
+# package.json 的 bundles 列表（见本目录 package.json）。
+#
+# patch 语义：id 命中的行「整行 config 替换」，因此只 restate 必须改的键，
+# 其余官方默认全部保留（官方 web-app 已把 agent-plane 工具移入 preset）。
+#
+# 客服专属 host 插件以绝对路径插入。路径在部署时固定为容器内
+# /app/customer-service/...；本地开发用 dsh 源码根目录（见 install.sh
+# 生成的 profile 覆盖）。
+
+# ── 会话默认 preset：客服助手 ──────────────────────────────────────────────
+# 客服系统默认会话使用知识库驱动的客服助手 preset（工具受限，无代码执行）。
+- id: agent-presets
+  config:
+    default: customer-service
+
+# ── 模型路由（客服部署自带默认 provider）────────────────────────────────────
+# llm-pi-ai 行级静态 providers：部署通过环境变量注入 apiKey（见 docker-compose
+# 的 env_file）。Admin 仍可在设置页覆盖/新增 provider；此处提供容器开箱即用的
+# 默认路由（agentrouter 网关或直连均可，按部署填 baseURL/apiKeyEnv）。
+- id: llm-pi-ai
+  config:
+    providers:
+      agentrouter:
+        displayName: AgentRouter
+        api: openai-completions
+        apiKeyEnv: AGENTROUTER_API_KEY
+        baseURL: http://host.docker.internal:8787/v1
+        compat:
+          supportsDeveloperRole: false
+        models:
+          - id: deepseek-v4-flash
+            name: DeepSeek V4 Flash
+            contextWindow: 1000000
+            maxTokens: 384000
+            reasoningEfforts:
+              off: null
+              low: low
+              medium: medium
+              high: high
+              max: max
+
+      commandcode:
+        displayName: Command Code
+        api: openai-completions
+        apiKeyEnv: CMD_API_KEY_2
+        baseURL: https://api.commandcode.ai/provider/v1
+        compat:
+          supportsDeveloperRole: false
+        models:
+          - id: deepseek/deepseek-v4-flash
+            name: DeepSeek V4 Flash
+            contextWindow: 1000000
+            maxTokens: 384000
+            reasoningEfforts:
+              off: null
+              low: low
+              medium: medium
+              high: high
+              max: max
+
+      noocool:
+        displayName: NooCool
+        api: openai-completions
+        apiKeyEnv: NOOCOOL_API_KEY
+        baseURL: https://newapi.noo.cool/v1
+        compat:
+          supportsDeveloperRole: false
+        models:
+          - id: deepseek-v4-flash
+            name: DeepSeek V4 Flash
+            contextWindow: 1000000
+            maxTokens: 384000
+            reasoningEfforts:
+              off: null
+              low: low
+              medium: medium
+              high: high
+              max: max
+
+# ── 会话默认模型指向上面注册的路由 ─────────────────────────────────────────
+- id: agent-default-model
+  config:
+    provider: commandcode
+    model: deepseek/deepseek-v4-flash
+
+# ── Guest 游客 HTTP 桥（host 层）───────────────────────────────────────────
+# 匿名访客对话 JSON API（/api/guest/*），驱动 customer-service-guest preset
+# 会话；自带按 IP 限流。路径在 Docker 内固定为 /app/customer-service。
+- insert:
+    - id: guest-server
+      name: '/app/customer-service/plugins/guest-server/src/index.ts'
+      config:
+        preset: customer-service-guest
+        workspace: /kb

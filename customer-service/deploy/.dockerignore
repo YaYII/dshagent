@@ -1,0 +1,21 @@
+# dshagent 客服系统 — Docker 构建上下文排除
+# 缩小 build context；依赖在容器内 pnpm install 重建。
+# 注意：不排除 **/lib（vendor/ 与 workspace 包的 lib 是 install/build 的
+# 输入），只排除 node_modules 与运行时/无关杂物。
+
+.git
+.gitignore
+node_modules
+**/node_modules
+**/*.tsbuildinfo
+.dsh
+.dsh-build
+.code-cognition
+.agent-presets
+coverage
+tmp
+examples
+.pnpm-store
+customer-service/deploy/.env
+customer-service/deploy/kb
+**/.DS_Store

@@ -1,0 +1,92 @@
+# The `customer-service` agent preset: a knowledge-grounded customer-service
+# assistant for the dshagent customer-service deployment.
+#
+# This is an AGENT-PLANE composition: it mounts under one session's scope and
+# registers only what THIS agent may do. The host composition (dsh-base +
+# dsh-web-app bundles) keeps the registries, sandbox/approval stack,
+# persistence, and the model route.
+#
+# Compared to the shipped `standard` coding preset this composition is a
+# deliberate REDUCTION: the agent answers customer questions from the
+# knowledge base and the conversation; it does not execute code, edit files,
+# spawn subagents, browse the open web, or run development workflows. This
+# keeps the deployment's attack surface small and the answers grounded.
+#
+# Rows that must sit inside an entry-local `isolate` realm (services this
+# preset alone populates) follow the shipped-preset grouping pattern.
+
+# ── identity ────────────────────────────────────────────────────────────────
+
+# Persona: a customer-service assistant grounded in the knowledge base.
+# `{{model}}`/`{{cwd}}` resolve from the agent's own route and workspace.
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: >-
+      You are the intelligent customer-service assistant of this company, powered by the {{model}} model.
+
+      Your job is to answer the user's questions accurately and helpfully, grounded in the company knowledge base.
+
+      Rules:
+      - Answer from the knowledge base when the question concerns company facts, products, policies, pricing, or procedures. Cite the source file you used.
+      - If the knowledge base does not contain the answer, say so honestly and offer to connect the user with a human agent. Never invent policies or facts.
+      - Keep answers concise and readable: short paragraphs, bullets, tables when comparing options.
+      - You may render a small chart (mermaid or an ECharts-style JSON block inside a code fence) or an image from the knowledge base when it genuinely helps the user understand the answer.
+      - You are not a coding agent. Never execute code, edit files, or perform system administration unless a customer-service workflow explicitly requires it.
+
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
+
+# ── knowledge base access (customer-service) ────────────────────────────────
+# The knowledge-search tool reads the read-only mounted knowledge base
+# (Obsidian vault directory). It is the ONLY information-gathering tool this
+# preset grants: no shell, no filesystem editor, no open-web search.
+#
+# The plugin ships with this preset directory tree (relative specifier
+# resolves from this composition's directory). The vault root is a runtime
+# mount point configured by the deployment (see customer-service/design.md).
+- id: knowledge-search
+  name: '/app/customer-service/plugins/knowledge-search/src/index.ts'
+  config:
+    vaultRoot: /kb
+    maxResults: 8
+
+# ── external data + knowledge capture (customer-service only) ───────────────
+# The customer-service agent may call allowed external JSON APIs (api_get) to
+# retrieve the data a customer asks about, and may record resolved cases or
+# useful answers back into the knowledge base (kb_write). Guests do NOT get
+# kb_write; their preset grants read (knowledge_search) plus api_get only.
+- id: api-client
+  name: '/app/customer-service/plugins/api-client/src/index.ts'
+  config:
+    vaultRoot: /kb
+    apiAllowlist:
+      - https://api.example.com/
+    # ↑ 部署占位：换成客服可调用的真实业务 API 前缀（如订单/产品服务）
+    enableWrite: true
+    allowOverwrite: false
+
+# ── conversation-only surface ───────────────────────────────────────────────
+# The human may interrupt/ask a clarifying question; the preset keeps the
+# user-questions affordance. No todo/goal/plan/command machinery: customer
+# sessions are single exchanges.
+- id: user-questions
+  name: '@deepseek-ai/dsh-user-questions'
+  disabled: true
+
+# ── deliberate absences ─────────────────────────────────────────────────────
+# Everything the shipped `standard` preset grants that a customer-service
+# agent must NOT have is simply absent here: tool-bash/tool-pwsh,
+# tool-fs/tool-fs-search/tool-str-replace-editor, tool-jobs,
+# skill-filesystem/tool-skill, command-goal/tool-goal, plan-mode,
+# compaction/command-compact/tool-result-pruner, delegation
+# (tool-subagent*/tool-workflow/tool-ralph), tool-ask-user, tool-todo,
+# tool-web. Absence (not disable) is the reduction: nothing registers into
+# the agent's catalog.
+
+# ── model route ─────────────────────────────────────────────────────────────
+# The deployment's settings document (settings.yaml, editable by Admin on the
+# Models page) owns provider/keys/model for all agents. This preset does not
+# pin a model so Admin configuration keeps working.

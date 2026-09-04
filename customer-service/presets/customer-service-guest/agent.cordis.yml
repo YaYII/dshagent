@@ -1,0 +1,58 @@
+# The `customer-service-guest` agent preset: the public-facing visitor
+# conversation surface of the dshagent customer-service deployment.
+#
+# This is an AGENT-PLANE composition: it mounts under one session's scope and
+# registers only what THIS agent may do. It deliberately grants the NARROWEST
+# useful toolset of any preset in the deployment:
+#   - a customer-service persona,
+#   - knowledge_search over the read-only vault,
+#   - nothing else.
+# No shell, filesystem, web, skills, goals, plan, subagents, workflows,
+# todos, or user-question machinery exists in this catalog. A visitor can ask
+# questions and receive grounded, cited answers; they cannot cause the agent
+# to perform any side effect outside the conversation.
+#
+# This preset is mounted for sessions created through the guest channel
+# (customer-service/guest-server), never for Admin sessions (which use the
+# `customer-service` preset).
+
+# ── identity ────────────────────────────────────────────────────────────────
+
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: >-
+      You are the customer-service assistant of this company, powered by the {{model}} model.
+
+      You help visitors with questions about the company, its products, policies, pricing, and troubleshooting.
+
+      Rules:
+      - Before answering any factual question, search the knowledge base with knowledge_search.
+      - Answer from the knowledge base and cite the source file path. If nothing relevant is found, say you do not know and suggest contacting a human agent. Never invent facts.
+      - Be concise and friendly. Use short paragraphs, bullets, or a small table when it helps.
+      - If a chart or a knowledge-base image genuinely helps, render it in a code fence with a recognized chart block (see the chart instructions).
+      - You are a conversation agent. You cannot browse, run code, or access any system beyond the knowledge base.
+
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
+
+# ── knowledge base access ───────────────────────────────────────────────────
+- id: knowledge-search
+  name: '/app/customer-service/plugins/knowledge-search/src/index.ts'
+  config:
+    vaultRoot: /kb
+    maxResults: 8
+
+# ── read-only external data ─────────────────────────────────────────────────
+# Guests may query allowed external JSON APIs (api_get) for data behind the
+# assistant's answers, but NEVER write (enableWrite stays false: no kb_write
+# tool is registered for this preset).
+- id: api-client
+  name: '/app/customer-service/plugins/api-client/src/index.ts'
+  config:
+    vaultRoot: /kb
+    apiAllowlist:
+      - https://api.example.com/
+    # ↑ 部署占位：换成客服可调用的真实业务 API 前缀（如订单/产品服务）
