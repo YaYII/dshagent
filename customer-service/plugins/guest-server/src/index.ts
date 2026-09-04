@@ -196,6 +196,58 @@ export function apply(ctx: Context, config: Config): void {
     return { reply, sources: extractSources(reply) }
   }
 
+  /**
+   * Live SSE stream subscriptions, keyed by session id. While a
+   * chat/stream request awaits its turn, the global session/event listener
+   * below forwards assistant text deltas to the matching subscriber.
+   */
+  const streamers = new Map<string, (event: string, data: unknown) => void>()
+
+  /**
+   * Run one streamed turn: send the user message, wait for quiescence while
+   * text deltas are pushed to `onDelta`, then return the final reply.
+   */
+  const runChatStream = async (
+    sessionId: string,
+    text: string,
+    onDelta: (delta: string) => void,
+  ): Promise<{ reply: string; sources: string[] }> => {
+    const guest = guests.get(sessionId)
+    if (guest === undefined) throw new Error('unknown session')
+    const agent = ctx.agents.get(sessionId as never)
+    if (agent === undefined) throw new Error('session agent is not live')
+    streamers.set(sessionId, (_event, data) => {
+      onDelta(String((data as { text?: string }).text ?? ''))
+    })
+    try {
+      const message = createUserMessage({
+        content: [{ type: 'text', text }],
+        source: { kind: 'user' },
+      })
+      agent.followup(message)
+      await agent.whenIdle()
+      const reply = await readLatestAssistantText(sessionId as never)
+      return { reply, sources: extractSources(reply) }
+    } finally {
+      streamers.delete(sessionId)
+    }
+  }
+
+  // Forward assistant text deltas of live turns to the matching stream
+  // subscriber. `session/event` fires for every committed event of every
+  // session; only sessions with an active streamer are forwarded. The chunk
+  // stream carries text-delta pieces; reasoning and tool deltas are ignored
+  // (guests see the answer text only).
+  ctx.on('session/event', (session, event) => {
+    const push = streamers.get(String(session.id))
+    if (push === undefined) return
+    if (event.type !== 'assistant/chunk') return
+    const chunk = (event.data as { chunk?: { type?: string; text?: string } }).chunk
+    if (chunk?.type === 'text-delta' && typeof chunk.text === 'string') {
+      push('delta', { text: chunk.text })
+    }
+  })
+
   /** Read the most recent assistant text via the official session-query service. */
   const readLatestAssistantText = async (sessionId: never): Promise<string> => {
     const snapshot = await ctx.sessionQuery.readSession(sessionId)
@@ -269,6 +321,49 @@ export function apply(ctx: Context, config: Config): void {
             sendJson(res, 200, result)
           } catch (error) {
             sendJson(res, 500, { error: error instanceof Error ? error.message : 'turn failed' })
+          }
+          return
+        }
+        if (req.method === 'POST' && path === '/api/guest/chat/stream') {
+          // Server-Sent Events: text deltas stream as they are produced so
+          // the visitor sees the answer appear instead of waiting for the
+          // full turn (large knowledge-base turns can take a minute+).
+          const raw = await readBody(req)
+          let parsed: unknown
+          try {
+            parsed = JSON.parse(raw)
+          } catch {
+            sendJson(res, 400, { error: 'invalid JSON body' })
+            return
+          }
+          const { sessionId, message } = (parsed ?? {}) as { sessionId?: string; message?: string }
+          if (typeof sessionId !== 'string' || typeof message !== 'string' || message.trim() === '') {
+            sendJson(res, 400, { error: 'sessionId and message (non-empty string) are required' })
+            return
+          }
+          if (!chats.allow(ip)) {
+            sendJson(res, 429, { error: 'rate limit exceeded' })
+            return
+          }
+          res.writeHead(200, {
+            'content-type': 'text/event-stream; charset=utf-8',
+            'cache-control': 'no-store',
+            'connection': 'keep-alive',
+            'x-accel-buffering': 'no',
+          })
+          const sendEvent = (event: string, data: unknown): void => {
+            res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+          }
+          sendEvent('meta', { sessionId })
+          try {
+            const result = await runChatStream(sessionId, message, (delta) => {
+              sendEvent('delta', { text: delta })
+            })
+            sendEvent('done', { reply: result.reply, sources: result.sources })
+          } catch (error) {
+            sendEvent('error', { error: error instanceof Error ? error.message : 'turn failed' })
+          } finally {
+            res.end()
           }
           return
         }

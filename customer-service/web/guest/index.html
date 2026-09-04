@@ -238,27 +238,98 @@
     return sessionId
   }
 
+  /** Parse one SSE stream from a fetch Response, calling handlers per event. */
+  async function consumeSse(res, onEvent) {
+    if (!res.body) throw new Error('no stream body')
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      // SSE frames are separated by a blank line
+      let idx
+      while ((idx = buffer.indexOf('\n\n')) !== -1) {
+        const frame = buffer.slice(0, idx)
+        buffer = buffer.slice(idx + 2)
+        let event = 'message'
+        let data = ''
+        for (const line of frame.split('\n')) {
+          if (line.startsWith('event:')) event = line.slice(6).trim()
+          else if (line.startsWith('data:')) data += line.slice(5).trim()
+        }
+        if (data) {
+          let parsed
+          try { parsed = JSON.parse(data) } catch { parsed = { raw: data } }
+          onEvent(event, parsed)
+        }
+      }
+    }
+  }
+
   async function send() {
     const text = inputEl.value.trim()
     if (!text) return
     inputEl.value = ''
     addMessage('user', renderMarkdown(text))
-    const typing = addMessage('assistant', '<span class="typing">思考中</span>')
+    // 流式消息气泡：随 delta 增量渲染（打字机效果）
+    const bubbleHost = document.createElement('div')
+    bubbleHost.className = 'msg assistant'
+    const avatar = document.createElement('div')
+    avatar.className = 'avatar'
+    avatar.textContent = 'AI'
+    const bubble = document.createElement('div')
+    bubble.className = 'bubble'
+    bubble.textContent = ''
+    bubbleHost.appendChild(avatar)
+    bubbleHost.appendChild(bubble)
+    chatEl.appendChild(bubbleHost)
+    chatEl.scrollTop = chatEl.scrollHeight
     sendEl.disabled = true
+    let streamed = ''
     try {
       const id = await ensureSession()
-      const res = await fetch('/api/guest/chat', {
+      const res = await fetch('/api/guest/chat/stream', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ sessionId: id, message: text }),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'request failed')
-      typing.remove()
-      addMessage('assistant', renderMarkdown(data.reply), data.sources)
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}))
+        throw new Error(errData.error || `request failed (${res.status})`)
+      }
+      let sources = []
+      let done = false
+      let streamError = null
+      await consumeSse(res, (event, data) => {
+        if (event === 'delta' && typeof data.text === 'string') {
+          streamed += data.text
+          bubble.innerHTML = renderMarkdown(streamed)
+          chatEl.scrollTop = chatEl.scrollHeight
+        } else if (event === 'sources' && Array.isArray(data.sources)) {
+          sources = data.sources
+        } else if (event === 'done') {
+          done = true
+          if (typeof data.reply === 'string' && data.reply) {
+            streamed = data.reply
+            bubble.innerHTML = renderMarkdown(streamed)
+          }
+          sources = data.sources || sources
+          if (sources.length) {
+            const src = document.createElement('div')
+            src.className = 'sources'
+            src.innerHTML = sources.map(s => `<span>📄 ${esc(s)}</span>`).join('')
+            bubble.appendChild(src)
+          }
+        } else if (event === 'error') {
+          streamError = data.error || 'turn failed'
+        }
+      })
+      if (streamError) throw new Error(streamError)
+      if (!done && !streamed) throw new Error('stream ended without reply')
     } catch (err) {
-      typing.remove()
-      addMessage('assistant', `<p>抱歉，出了点问题：${esc(err.message)}</p>`)
+      if (!streamed) bubble.innerHTML = `<p>抱歉，出了点问题：${esc(err.message)}</p>`
     } finally {
       sendEl.disabled = false
       inputEl.focus()
