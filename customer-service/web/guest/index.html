@@ -83,6 +83,18 @@
     animation: spin 0.9s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+  /* "正在查询中" 等待指示（回答首字到达前的占位动画） */
+  .waiting {
+    display: inline-flex; align-items: center; gap: 8px;
+    color: var(--muted); font-size: 14px;
+  }
+  .spinner-sm {
+    width: 14px; height: 14px; border-radius: 50%;
+    border: 2px solid var(--brand-weak);
+    border-top-color: var(--brand);
+    animation: spin 0.8s linear infinite;
+    display: inline-block;
+  }
   .typing::after { content: "…"; animation: dots 1.2s infinite; }
   @keyframes dots { 0% { content: ""; } 33% { content: "."; } 66% { content: ".."; } 100% { content: "..."; } }
 </style>
@@ -344,7 +356,7 @@
     if (!text) return
     inputEl.value = ''
     addMessage('user', renderMarkdown(text))
-    // 流式消息气泡：随 delta 增量渲染（打字机效果）
+    // 流式消息气泡：先显示"正在查询"动画，收到首个内容后替换为回答
     const bubbleHost = document.createElement('div')
     bubbleHost.className = 'msg assistant'
     const avatar = document.createElement('div')
@@ -352,13 +364,18 @@
     avatar.textContent = 'AI'
     const bubble = document.createElement('div')
     bubble.className = 'bubble'
-    bubble.textContent = ''
+    bubble.innerHTML = '<span class="waiting"><span class="spinner-sm"></span>正在查询中…</span>'
     bubbleHost.appendChild(avatar)
     bubbleHost.appendChild(bubble)
     chatEl.appendChild(bubbleHost)
     chatEl.scrollTop = chatEl.scrollHeight
     sendEl.disabled = true
     let streamed = ''
+    /** Replace the waiting indicator with real content on the first delta. */
+    function showStreamed() {
+      bubble.innerHTML = renderMarkdown(streamed)
+      chatEl.scrollTop = chatEl.scrollHeight
+    }
     try {
       const id = await ensureSession()
       const res = await fetch(`${API_BASE}/api/guest/chat/stream`, {
@@ -375,16 +392,20 @@
       let streamError = null
       await consumeSse(res, (event, data) => {
         if (event === 'delta' && typeof data.text === 'string') {
+          const first = streamed === ''
           streamed += data.text
-          bubble.innerHTML = renderMarkdown(streamed)
-          chatEl.scrollTop = chatEl.scrollHeight
+          if (first) showStreamed()
+          else {
+            bubble.innerHTML = renderMarkdown(streamed)
+            chatEl.scrollTop = chatEl.scrollHeight
+          }
         } else if (event === 'sources' && Array.isArray(data.sources)) {
           sources = data.sources
         } else if (event === 'done') {
           done = true
           if (typeof data.reply === 'string' && data.reply) {
             streamed = data.reply
-            bubble.innerHTML = renderMarkdown(streamed)
+            showStreamed()
           }
           sources = data.sources || sources
           if (sources.length) {
@@ -400,7 +421,8 @@
       if (streamError) throw new Error(streamError)
       if (!done && !streamed) throw new Error('stream ended without reply')
     } catch (err) {
-      if (!streamed) bubble.innerHTML = `<p>抱歉，出了点问题：${esc(err.message)}</p>`
+      // Show the error in place of the waiting animation.
+      bubble.innerHTML = `<p>抱歉，出了点问题：${esc(err.message)}</p>`
     } finally {
       sendEl.disabled = false
       inputEl.focus()
