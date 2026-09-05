@@ -97,3 +97,7 @@
       config:
         preset: customer-service-guest
         workspace: /kb
+        # Customer-service Q&A is retrieval-grounded: pin a low reasoning
+        # effort so one uncertain turn cannot burn ~15-20s on a long internal
+        # reasoning chain before the first answer token reaches the visitor.
+        reasoningEffort: low

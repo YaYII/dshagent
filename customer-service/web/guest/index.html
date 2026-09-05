@@ -502,8 +502,10 @@
     try {
       const res = await fetch(`${API_BASE}/api/guest/history?sessionId=${encodeURIComponent(sessionId)}`)
       if (!res.ok) {
-        if (res.status === 404) {
-          // Server no longer knows this session: start fresh.
+        // 400 (malformed) and 404 (session gone on the server) both mean the
+        // stored session id is unusable: drop it and start a fresh one. Only
+        // genuine server/network errors keep the id so chat can retry.
+        if (res.status === 400 || res.status === 404) {
           localStorage.removeItem('dshagent_session')
           sessionId = null
         }

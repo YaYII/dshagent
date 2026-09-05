@@ -34,7 +34,7 @@ import { randomUUID } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 
 /** Export shape expected of function plugins. */
 export const name = 'guest-server'
@@ -55,6 +55,15 @@ export interface Config {
   spamRepeat: number
   /** Block duration in ms after an attack is detected (cool-down). */
   blockMs: number
+  /**
+   * Reasoning effort pinned for guest turns. Customer-service Q&A is
+   * retrieval-grounded and rarely benefits from deep deliberation; leaving
+   * the model at its default (high) effort lets a single uncertain turn
+   * burn 15-20s emitting a long reasoning chain before the first answer
+   * token. Pin low/off so first tokens arrive fast (mobile visitors leave
+   * otherwise). Omit to keep the deployment default.
+   */
+  reasoningEffort?: string
 }
 
 /** Schemastery configuration. */
@@ -65,6 +74,7 @@ export const Config: z<Config> = z.object({
   spamWindowMs: z.number().default(30_000),
   spamRepeat: z.number().default(3),
   blockMs: z.number().default(60_000),
+  reasoningEffort: z.string(),
 })
 
 /**
@@ -292,6 +302,9 @@ export function apply(ctx: Context, config: Config): void {
         provider: selection.provider,
         model: selection.model,
         ...(selection.reasoningEffort === undefined ? {} : { reasoningEffort: selection.reasoningEffort }),
+        ...(config.reasoningEffort === undefined
+          ? {}
+          : { reasoningEffort: ReasoningEffortId(config.reasoningEffort) }),
       },
       setup: async (agentCtx) => {
         await ctx.agentPresets.mount(agentCtx, resolved)
@@ -330,6 +343,9 @@ export function apply(ctx: Context, config: Config): void {
             provider: selection.provider,
             model: selection.model,
             ...(selection.reasoningEffort === undefined ? {} : { reasoningEffort: selection.reasoningEffort }),
+            ...(config.reasoningEffort === undefined
+              ? {}
+              : { reasoningEffort: ReasoningEffortId(config.reasoningEffort) }),
           },
           setup: async (agentCtx) => {
             await ctx.agentPresets.mount(agentCtx, resolved)
