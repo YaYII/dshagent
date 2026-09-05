@@ -131,7 +131,8 @@
   <h1 data-i18n="appTitle">智能客服</h1>
   <span class="status" id="status" data-i18n="connecting">连接中…</span>
   <div class="langs" id="langs">
-    <button type="button" data-lang="zh">中文</button>
+    <button type="button" data-lang="zh">简体</button>
+    <button type="button" data-lang="zhHant">繁體</button>
     <button type="button" data-lang="en">EN</button>
     <button type="button" data-lang="pt">PT</button>
   </div>
@@ -159,7 +160,7 @@
 (() => {
   'use strict'
 
-  // ── i18n：界面文案按访客系统语言自动切换（zh / en / pt，en 兜底）──
+  // ── i18n：界面文案按访客系统语言自动切换（zh 简中 / zhHant 繁中 / en / pt，en 兜底）──
   // 新增语言只需在此加一个字典；key 不变，页面/逻辑无需改动。
   const I18N = {
     zh: {
@@ -178,6 +179,23 @@
       aiLabel: 'AI',
       // 建议问题（欢迎页快捷提问），点击即发送
       suggestions: ['客服热线是多少？', '如何缴交电费？', '遇到停电怎么办？', '电动车如何充电？'],
+    },
+    zhHant: {
+      appTitle: '智能客服',
+      connecting: '連接中…',
+      online: '在線',
+      offline: '離線',
+      welcomeTitle: '您好，我是智能客服助手 👋',
+      welcomeBody: '我可以回答關於產品、政策、價格等問題。請問有什麼可以幫您？',
+      restoring: '正在恢復對話記錄…',
+      inputPlaceholder: '請輸入您的問題…',
+      send: '傳送',
+      waiting: '正在查詢中…',
+      errorGeneric: '抱歉，出了點問題：',
+      userLabel: '我',
+      aiLabel: 'AI',
+      // 建議問題（歡迎頁快捷提問），點擊即傳送
+      suggestions: ['客服熱線是多少？', '如何繳交電費？', '遇到停電怎麼辦？', '電動車如何充電？'],
     },
     en: {
       appTitle: 'Customer Service',
@@ -220,7 +238,11 @@
       : [navigator.language || navigator.userLanguage || '']
     for (const pref of prefs) {
       const raw = String(pref || '').toLowerCase()
-      if (raw.startsWith('zh')) return 'zh'
+      // Traditional Chinese regions and explicit Hant script tags.
+      if (raw.startsWith('zh')) {
+        if (/zh[-_]?(tw|hk|mo|hant)/.test(raw)) return 'zhHant'
+        return 'zh'
+      }
       if (raw.startsWith('pt')) return 'pt'
     }
     return 'en'
@@ -274,7 +296,7 @@
     if (persist) {
       try { localStorage.setItem(LANG_KEY, next) } catch { /* storage unavailable */ }
     }
-    document.documentElement.lang = next === 'zh' ? 'zh-CN' : next
+    document.documentElement.lang = next === 'zh' ? 'zh-CN' : (next === 'zhHant' ? 'zh-Hant' : next)
     document.querySelectorAll('#langs button').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.lang === next)
     })
