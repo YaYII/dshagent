@@ -8,9 +8,11 @@
  * which is read-only (knowledge_search over the vault).
  *
  * Route contract (all JSON, UTF-8):
- *   POST /api/guest/session   -> 201 { sessionId }       (new visitor session)
+ *   POST /api/guest/session   -> 201 { sessionId, version }  (new visitor session)
  *   POST /api/guest/chat      -> 200 { reply, sources }  (send one message, await reply)
- *   GET  /api/guest/health    -> 200 { ok: true }
+ *   GET  /api/guest/health    -> 200 { ok: true, version }
+ * (version = Config.serviceVersion, the deployment build stamp shown on the
+ * guest UI badge; SSE meta events carry it too.)
  *
  * Per-IP rate limiting is enforced in memory on the chat route: each client
  * may send at most `rateLimitPerWindow` chats per `rateLimitWindowMs`. The
@@ -47,6 +49,12 @@ export interface Config {
   preset: string
   /** Workspace (cwd) for guest sessions; the persona's {{cwd}} and sandbox anchor. */
   workspace: string
+  /**
+   * Deployment build stamp (e.g. `2026-09-09.1`) reported to the guest UI so
+   * a visitor/operator can tell which server build answered. Omit to degrade
+   * to `unknown`.
+   */
+  serviceVersion?: string
   /** Process-wide ceiling of live guest sessions (memory guard). */
   maxSessions: number
   /** Window (ms) in which repeated identical messages count as spam. */
@@ -70,6 +78,7 @@ export interface Config {
 export const Config: z<Config> = z.object({
   preset: z.string().default('customer-service-guest'),
   workspace: z.string().default('/kb'),
+  serviceVersion: z.string(),
   maxSessions: z.number().default(500),
   spamWindowMs: z.number().default(30_000),
   spamRepeat: z.number().default(3),
@@ -261,6 +270,8 @@ export function apply(ctx: Context, config: Config): void {
     return null
   }
   const guests = new Map<string, GuestSession>()
+  /** Server build stamp surfaced to the guest UI badge (see Config.serviceVersion). */
+  const serviceVersion = config.serviceVersion ?? 'unknown'
 
   /** Drop a guest session (agent + map entry). */
   const dropGuest = async (sessionId: string): Promise<void> => {
@@ -504,11 +515,12 @@ export function apply(ctx: Context, config: Config): void {
         const url = new URL(req.url ?? '/', 'http://localhost')
         const path = url.pathname.replace(/\/+$/, '')
         if (req.method === 'GET' && path === '/api/guest/health') {
-          sendJson(res, 200, { ok: true })
+          sendJson(res, 200, { ok: true, version: serviceVersion })
           return
         }
         if (req.method === 'POST' && path === '/api/guest/session') {
-          sendJson(res, 201, await createGuest())
+          const { sessionId } = await createGuest()
+          sendJson(res, 201, { sessionId, version: serviceVersion })
           return
         }
         if (req.method === 'GET' && path === '/api/guest/history') {
@@ -588,7 +600,7 @@ export function apply(ctx: Context, config: Config): void {
           const sendEvent = (event: string, data: unknown): void => {
             res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
           }
-          sendEvent('meta', { sessionId })
+          sendEvent('meta', { sessionId, version: serviceVersion })
           if (warnNotice !== null) sendEvent('notice', { text: warnNotice })
           try {
             const result = await runChatStream(sessionId, message, (delta) => {
