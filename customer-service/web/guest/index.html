@@ -171,6 +171,7 @@
       welcomeTitle: '您好，我是智能客服助手 👋',
       welcomeBody: '我可以回答关于产品、政策、价格等问题。请问有什么可以帮您？',
       restoring: '正在恢复对话记录…',
+      recovering: '网络不稳定，正在为您恢复回答…',
       inputPlaceholder: '请输入您的问题…',
       send: '发送',
       waiting: '正在查询中…',
@@ -205,6 +206,7 @@
       welcomeTitle: 'Hello, I am your customer-service assistant 👋',
       welcomeBody: 'I can answer questions about our products, policies, pricing and more. How can I help?',
       restoring: 'Restoring your conversation…',
+      recovering: 'Network unstable, retrieving your answer…',
       inputPlaceholder: 'Type your question…',
       send: 'Send',
       waiting: 'Searching…',
@@ -221,6 +223,7 @@
       welcomeTitle: 'Olá, sou o seu assistente de apoio ao cliente 👋',
       welcomeBody: 'Posso responder a perguntas sobre produtos, políticas, preços e mais. Como posso ajudar?',
       restoring: 'A restaurar a sua conversa…',
+      recovering: 'Ligação instável, a recuperar a sua resposta…',
       inputPlaceholder: 'Escreva a sua pergunta…',
       send: 'Enviar',
       waiting: 'A pesquisar…',
@@ -532,16 +535,45 @@
     }
   }
 
-  /** Parse one SSE stream from a fetch Response, calling handlers per event. */
+  /**
+   * Parse one SSE stream from a fetch Response, calling handlers per event.
+   * Watchdog: the free ngrok tunnel sometimes opens the SSE response but then
+   * stops forwarding frames (no data, no FIN) — a blocked reader.read() would
+   * otherwise hang forever and the spinner would spin indefinitely. Each read
+   * races a 30s timer; a stall throws and send() recovers the persisted reply
+   * from history.
+   * @param res - fetch Response whose body is an SSE stream.
+   * @param onEvent - per-frame handler `(event, data)`.
+   */
   async function consumeSse(res, onEvent) {
     if (!res.body) throw new Error('no stream body')
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
+    // Tunnel stall detection: ngrok's free tier sometimes opens the SSE
+    // response then never delivers another frame (no data, no FIN). A normal
+    // turn starts producing frames within ~10s (reasoning is filtered out, so
+    // the first visible frame may lag a few seconds behind the model start).
+    // If no frame arrives within 25s of the previous one the tunnel is dead.
+    const stallMs = 25000
     let buffer = ''
     while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
+      // Race the read against a stall timer: ngrok (free tunnel) occasionally
+      // holds the connection open without delivering frames, so read() alone
+      // never resolves. Throw so send() can fall back to history recovery.
+      let chunk
+      try {
+        chunk = await Promise.race([
+          reader.read(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('stream stalled')), stallMs)),
+        ])
+      } catch (err) {
+        // Do NOT await reader.cancel(): on a tunnel that stopped forwarding
+        // frames, cancel() itself can hang. Fire it and surface the stall.
+        reader.cancel().catch(() => { /* best-effort */ })
+        throw err
+      }
+      if (chunk.done) break
+      buffer += decoder.decode(chunk.value, { stream: true })
       // SSE frames are separated by a blank line
       let idx
       while ((idx = buffer.indexOf('\n\n')) !== -1) {
@@ -560,6 +592,44 @@
         }
       }
     }
+  }
+
+  /**
+   * Recover a reply after a dropped stream: poll the server history until the
+   * assistant answer following our message appears (the server keeps running
+   * the turn even when the SSE connection dies). Gives up after ~20s so a
+   * genuinely failed request surfaces as an error instead of an endless wait.
+   * @param text - the exact user message whose reply we are waiting for.
+   */
+  async function recoverReply(text) {
+    const deadline = Date.now() + 20000
+    let first = true
+    while (Date.now() < deadline) {
+      if (!first) await new Promise(r => setTimeout(r, 1200))
+      first = false
+      try {
+        const res = await fetch(`${API_BASE}/api/guest/history?sessionId=${encodeURIComponent(sessionId)}`)
+        if (!res.ok) continue
+        const data = await res.json()
+        const messages = data.messages || []
+        // Find the newest assistant message that answers this exact question
+        // (the last matching user message, then the assistant text after it).
+        let found = null
+        for (let i = messages.length - 1; i >= 0; i--) {
+          if (messages[i].role === 'user' && messages[i].text === text) {
+            found = i
+            break
+          }
+        }
+        if (found !== null) {
+          const next = messages[found + 1]
+          if (next && next.role === 'assistant' && next.text) {
+            return { text: next.text, sources: next.sources }
+          }
+        }
+      } catch { /* server restarting / offline: keep polling */ }
+    }
+    return null
   }
 
   async function send() {
@@ -581,7 +651,12 @@
     chatEl.appendChild(bubbleHost)
     chatEl.scrollTop = chatEl.scrollHeight
     sendEl.disabled = true
+    // State read by the catch block below — must live OUTSIDE the try block
+    // (let is block-scoped, so declarations inside try are invisible to catch).
     let streamed = ''
+    let sources = []
+    let done = false
+    let streamError = null
     /** Replace the waiting indicator with real content on the first delta. */
     function showStreamed() {
       bubble.innerHTML = renderMarkdown(streamed)
@@ -589,20 +664,28 @@
     }
     try {
       const id = await ensureSession()
-      const res = await fetch(`${API_BASE}/api/guest/chat/stream`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ sessionId: id, message: text }),
-      })
+      // Hard deadline for the whole request: if ngrok never delivers headers
+      // OR stalls mid-stream, aborting the fetch guarantees the catch path
+      // runs (and recovers the persisted reply) instead of spinning forever.
+      const controller = new AbortController()
+      const hardDeadline = setTimeout(() => controller.abort(), 45000)
+      let res
+      try {
+        res = await fetch(`${API_BASE}/api/guest/chat/stream`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ sessionId: id, message: text }),
+          signal: controller.signal,
+        })
+      } finally {
+        clearTimeout(hardDeadline)
+      }
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}))
         // Blocked/rate-limited responses carry a user-facing message
         // (e.g. the calm-down notice); prefer it over the raw error code.
         throw new Error(errData.message || errData.error || `request failed (${res.status})`)
       }
-      let sources = []
-      let done = false
-      let streamError = null
       await consumeSse(res, (event, data) => {
         if (event === 'notice' && typeof data.text === 'string') {
           // Friendly reminder from the moderation layer (first-offence
@@ -644,8 +727,33 @@
       if (streamError) throw new Error(streamError)
       if (!done && !streamed) throw new Error('stream ended without reply')
     } catch (err) {
-      // Show the error in place of the waiting animation.
-      bubble.innerHTML = `<p>${t('errorGeneric')}${esc(err.message)}</p>`
+      // The stream dropped or stalled (proxy timeout / flaky mobile network /
+      // ngrok tunnel blip). The server turn usually still finishes and
+      // persists the reply, so recover it from history instead of showing a
+      // bare error: switch the bubble to a "recovering" state, poll history
+      // until the reply for this message appears, then render it.
+      const aborted = err && (err.name === 'AbortError' || /stalled|abort/i.test(String(err.message || '')))
+      const isNetworkDrop = !done || aborted || /network|fetch|load failed|ended without/i.test(String(err.message || ''))
+      if (isNetworkDrop && sessionId) {
+        bubble.innerHTML = `<span class="waiting"><span class="spinner-sm"></span>${t('recovering')}</span>`
+        const reply = await recoverReply(text)
+        if (reply) {
+          bubble.innerHTML = renderMarkdown(reply.text)
+          if (reply.sources && reply.sources.length) {
+            const src = document.createElement('div')
+            src.className = 'sources'
+            src.innerHTML = reply.sources.map(s => `<span>📄 ${esc(s)}</span>`).join('')
+            bubble.appendChild(src)
+          }
+          chatEl.scrollTop = chatEl.scrollHeight
+        } else {
+          // Genuine failure (or the server never got the message): show it.
+          bubble.innerHTML = `<p>${t('errorGeneric')}${esc(err.message)}</p>`
+        }
+      } else {
+        // Show the error in place of the waiting animation.
+        bubble.innerHTML = `<p>${t('errorGeneric')}${esc(err.message)}</p>`
+      }
     } finally {
       sendEl.disabled = false
       inputEl.focus()
