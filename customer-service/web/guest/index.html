@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title data-i18n="appTitle">智能客服</title>
+<!-- 内联 favicon：避免浏览器自动请求 /favicon.ico 得到 404（日志与控制台噪音） -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232563eb'/%3E%3Ctext x='16' y='24' font-size='20' text-anchor='middle' fill='%23ffffff'%3E%E2%9A%A1%3C/text%3E%3C/svg%3E">
 <style>
   :root {
     --bg: #f5f7fa; --panel: #ffffff; --text: #1f2937; --muted: #6b7280;
@@ -82,6 +84,10 @@
   .chart .bar-row { display: flex; align-items: center; gap: 8px; margin: 3px 0; font-size: 13px; }
   .chart .bar-row .label { width: 90px; text-align: right; flex: 0 0 auto; color: var(--muted); }
   .chart .bar-row .bar { height: 18px; background: var(--brand); border-radius: 3px; min-width: 2px; }
+  /* Mermaid 图表（思维脑图/流程图/时序图）：渲染成功后是 SVG；宽图横向滚动 */
+  .bubble .mermaid-src { margin: 10px 0; overflow-x: auto; }
+  .bubble .mermaid-src.mermaid-done { background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
+  .bubble .mermaid-src.mermaid-done svg { max-width: 100%; height: auto; display: block; margin: 0 auto; }
   .sources { margin-top: 6px; font-size: 12px; color: var(--muted); }
   .sources span { background: var(--brand-weak); padding: 1px 6px; border-radius: 10px; margin-right: 6px; }
   #composer { flex: 0 0 auto; background: var(--panel); border-top: 1px solid var(--border); padding: 12px 20px; display: flex; gap: 10px; }
@@ -362,7 +368,7 @@
 
   // ── 版本标识：每次发布递增，方便定位访客用的是哪个版本 ──────────────
   // 前端（此页面）版本号：改页面后 +1；服务端版本由 guest-server 注入。
-  const APP_VERSION = 'v2.1.0'
+  const APP_VERSION = 'v2.2.0'
   const svcAgentEl = document.getElementById('svcAgent')
   const svcVerEl = document.getElementById('svcVer')
   if (svcVerEl) svcVerEl.textContent = `前端 ${APP_VERSION} · 服务 --`
@@ -432,16 +438,19 @@
     let inList = false
     while (i < lines.length) {
       const line = lines[i]
-      const codeFence = /^```(\w*)/.exec(line)
+      const codeFence = /^```\s*([\w-]*)\s*(.*)$/.exec(line)
       if (codeFence) {
         inList = false
-        const lang = codeFence[1]
+        const lang = codeFence[1].toLowerCase()
+        // 语言后可能跟着图表关键字（如 ```mermaid mindmap），一并交给渲染器
+        const info = codeFence[2].trim()
         const buf = []
         i++
         while (i < lines.length && !/^```/.test(lines[i])) { buf.push(lines[i]); i++ }
         i++ // closing fence
         const body = buf.join('\n')
-        if (lang === 'chart') out.push(renderChart(body))
+        if (lang === 'mermaid') out.push(renderMermaidBlock(info, body))
+        else if (lang === 'chart') out.push(renderChart(body))
         else out.push(`<pre><code>${esc(body)}</code></pre>`)
         continue
       }
@@ -517,6 +526,68 @@
     }
   }
 
+  /**
+   * ```mermaid 代码块 → 渲染容器。mermaid 体积 3.5MB，只在回答里真的出现
+   * 图表时才懒加载（见 renderDiagrams），访客平时完全不下载。容器里先放
+   * 原始代码作为兜底：库加载失败或语法错误时，用户看到的仍是可读的代码。
+   */
+  function renderMermaidBlock(info, body) {
+    const head = body.trimStart()
+    const src = info && !head.startsWith(info) ? `${info}\n${body}` : body
+    return `<div class="mermaid-src" data-src="${esc(src)}"><pre><code>${esc(src)}</code></pre></div>`
+  }
+
+  // ── Mermaid 本地渲染（离线，浏览器端出图）─────────────────────────────
+  // 库文件随页面一起部署（/assets/mermaid-11.16.0.min.js，取本仓库已锁定的
+  // mermaid 11.16.0），渲染全在访客浏览器里完成，不需要任何在线渲染服务。
+  const MERMAID_ASSET = 'assets/mermaid-11.16.0.min.js'
+  let mermaidPromise = null
+  let diagramSeq = 0
+
+  /** 懒加载 mermaid 库（同源相对路径，反代前缀自适应）；失败返回 null。 */
+  function loadMermaid() {
+    if (window.mermaid) return Promise.resolve(window.mermaid)
+    if (mermaidPromise) return mermaidPromise
+    mermaidPromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script')
+      script.src = MERMAID_ASSET
+      script.onload = () => {
+        if (!window.mermaid) { mermaidPromise = null; reject(new Error('mermaid not exposed')); return }
+        // startOnLoad:false —— 由 renderDiagrams 精确控制渲染时机；
+        // securityLevel:strict —— 模型输出一律当不可信内容，标签走净化。
+        window.mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default' })
+        resolve(window.mermaid)
+      }
+      script.onerror = () => { mermaidPromise = null; reject(new Error('mermaid load failed')) }
+      document.head.appendChild(script)
+    })
+    return mermaidPromise
+  }
+
+  /**
+   * 把 root 内还没渲染的 mermaid 块转成 SVG。流式回答期间保持代码块（避免
+   * 每个 delta 重排图），只在回答定稿（done / 断流恢复 / 历史恢复）时调用。
+   */
+  async function renderDiagrams(root) {
+    if (!root) return
+    const nodes = root.querySelectorAll('.mermaid-src:not([data-rendered])')
+    if (nodes.length === 0) return
+    let lib
+    try { lib = await loadMermaid() } catch { return /* 库拿不到：保留代码块 */ }
+    for (const node of nodes) {
+      node.setAttribute('data-rendered', '1')
+      const source = node.getAttribute('data-src') || ''
+      try {
+        const { svg } = await lib.render(`dsh-mmd-${++diagramSeq}`, source)
+        node.innerHTML = svg
+        node.classList.add('mermaid-done')
+      } catch (err) {
+        // 语法错误 / 渲染异常：保留原始代码块，控制台留证据
+        console.warn('[guest] mermaid 渲染失败，保留代码块：', err && err.message)
+      }
+    }
+  }
+
   function addMessage(role, html, sources) {
     if (welcomeEl) welcomeEl.hidden = true
     const restoring = document.getElementById('restoring')
@@ -584,6 +655,7 @@
           addMessage('user', renderMarkdown(m.text))
         }
       }
+      renderDiagrams(chatEl)
     } catch { /* offline / server restarted: keep session id, chat will resume it */ }
     finally {
       // addMessage removes welcome; if nothing was restored, show the
@@ -782,6 +854,7 @@
             src.innerHTML = sources.map(s => `<span>📄 ${esc(s)}</span>`).join('')
             bubble.appendChild(src)
           }
+          renderDiagrams(bubble)
         } else if (event === 'error') {
           streamError = data.error || 'turn failed'
         }
@@ -808,6 +881,7 @@
             bubble.appendChild(src)
           }
           chatEl.scrollTop = chatEl.scrollHeight
+          renderDiagrams(bubble)
         } else {
           // Genuine failure (or the server never got the message): show it.
           bubble.innerHTML = `<p>${t('errorGeneric')}${esc(err.message)}</p>`
