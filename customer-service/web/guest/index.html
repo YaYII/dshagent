@@ -107,6 +107,16 @@
     box-shadow: 0 1px 2px rgba(15, 23, 42, .08); opacity: 0; transition: opacity .18s ease;
   }
   .bubble .mermaid-src.mermaid-done:hover::after, .bubble .kb-image:hover::after { opacity: 1; }
+  /* HTML 预览（```html 块）：沙箱 iframe，可拖拽调高度、可切换源码 */
+  .bubble .html-block { margin: 12px 0; border: 1px solid var(--border); border-radius: 12px; background: #fff; overflow: hidden;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, .06); }
+  .bubble .html-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px;
+    background: #f8fafc; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+  .bubble .html-bar button { border: 1px solid var(--border); background: #fff; border-radius: 7px; padding: 3px 9px;
+    font-size: 12px; color: #475569; cursor: pointer; }
+  .bubble .html-bar button:hover { border-color: var(--brand); color: var(--brand); }
+  .bubble .html-frame { display: block; width: 100%; height: 320px; border: 0; background: #fff; resize: vertical; overflow: auto; }
+  .bubble .html-src { margin: 0; border-radius: 0; }
   /* 图片阅读器：可点开的图片/图表 + 深色毛玻璃底的放大查看层 */
   .bubble img, .bubble .mermaid-src.mermaid-done { cursor: zoom-in; }
   .viewer {
@@ -266,6 +276,9 @@
       viewerOpenTab: '新窗口打开',
       viewerDownload: '下载图片',
       viewerClose: '关闭（Esc）',
+      htmlPreview: 'HTML 预览',
+      htmlSource: '查看源码',
+      htmlSourceHide: '收起源码',
       imageUnavailable: '图片暂时无法显示（源站可能已移除该图）',
       // 建议问题（欢迎页快捷提问），点击即发送
       suggestions: ['客服热线是多少？', '如何缴交电费？', '遇到停电怎么办？', '电动车如何充电？'],
@@ -292,6 +305,9 @@
       viewerOpenTab: '新視窗開啟',
       viewerDownload: '下載圖片',
       viewerClose: '關閉（Esc）',
+      htmlPreview: 'HTML 預覽',
+      htmlSource: '檢視原始碼',
+      htmlSourceHide: '收起原始碼',
       imageUnavailable: '圖片暫時無法顯示（來源站可能已移除該圖）',
       // 建議問題（歡迎頁快捷提問），點擊即傳送
       suggestions: ['客服熱線是多少？', '如何繳交電費？', '遇到停電怎麼辦？', '電動車如何充電？'],
@@ -317,6 +333,9 @@
       viewerOpenTab: 'Open in new tab',
       viewerDownload: 'Download image',
       viewerClose: 'Close (Esc)',
+      htmlPreview: 'HTML preview',
+      htmlSource: 'View source',
+      htmlSourceHide: 'Hide source',
       imageUnavailable: 'Image unavailable (it may have been removed from the source site)',
       suggestions: ['What is the customer service hotline?', 'How can I pay my electricity bill?', 'What should I do during a power outage?', 'How do I charge my electric vehicle?'],
     },
@@ -341,6 +360,9 @@
       viewerOpenTab: 'Abrir em novo separador',
       viewerDownload: 'Transferir imagem',
       viewerClose: 'Fechar (Esc)',
+      htmlPreview: 'Pré-visualização HTML',
+      htmlSource: 'Ver código',
+      htmlSourceHide: 'Ocultar código',
       imageUnavailable: 'Imagem indisponível (pode ter sido removida do site de origem)',
       suggestions: ['Qual é a linha de apoio ao cliente?', 'Como posso pagar a conta de eletricidade?', 'O que fazer durante uma falha de energia?', 'Como carrego o meu veículo elétrico?'],
     },
@@ -459,7 +481,7 @@
 
   // ── 版本标识：每次发布递增，方便定位访客用的是哪个版本 ──────────────
   // 前端（此页面）版本号：改页面后 +1；服务端版本由 guest-server 注入。
-  const APP_VERSION = 'v2.6.1'
+  const APP_VERSION = 'v2.7.0'
   const svcAgentEl = document.getElementById('svcAgent')
   const svcVerEl = document.getElementById('svcVer')
   if (svcVerEl) svcVerEl.textContent = `前端 ${APP_VERSION} · 服务 --`
@@ -547,7 +569,7 @@
         const body = buf.join('\n')
         // 流式回答里围栏还没收尾时先当代码块：半截路径/半截语法拿去渲染会发出
         // 无效请求（实测 /uploads/tos_bg_d37 被请求 → 404）并造成闪动。
-        const needsClose = lang === 'mermaid' || lang === 'image' || lang === 'img' || lang === 'chart'
+        const needsClose = lang === 'mermaid' || lang === 'image' || lang === 'img' || lang === 'chart' || lang === 'html'
         if (needsClose && !closed) {
           out.push(`<pre><code>${esc(body)}</code></pre>`)
           continue
@@ -555,6 +577,7 @@
         if (lang === 'mermaid') out.push(renderMermaidBlock(info, body))
         else if (lang === 'image' || lang === 'img') out.push(renderImageBlock(body))
         else if (lang === 'chart') out.push(renderChart(body))
+        else if (lang === 'html') out.push(renderHtmlBlock(body))
         else out.push(`<pre><code>${esc(body)}</code></pre>`)
         continue
       }
@@ -642,6 +665,44 @@
     return `<figure class="kb-image"><img src="${esc(imageSrcOf(raw))}" alt="${esc(caption)}" loading="lazy">`
       + (caption ? `<figcaption>${esc(caption)}</figcaption>` : '')
       + '</figure>'
+  }
+
+  /** 沙箱预览里的基础排版：模型 HTML 没带样式时也不至于是一坨裸标签。 */
+  const HTML_PREVIEW_CSS = `
+    :root { color-scheme: light; }
+    body { margin: 0; padding: 12px 14px; font: 14px/1.65 "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", system-ui, -apple-system, "Segoe UI", sans-serif; color: #1f2937; background: #fff; }
+    h1, h2, h3, h4 { margin: 0 0 8px; font-weight: 600; line-height: 1.35; }
+    h1 { font-size: 18px } h2 { font-size: 16px } h3 { font-size: 15px }
+    p, ul, ol { margin: 0 0 10px } ul, ol { padding-left: 20px }
+    table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 13px; border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden; }
+    th, td { border-bottom: 1px solid #e5e7eb; padding: 8px 12px; text-align: left; }
+    tr:last-child td { border-bottom: 0; }
+    th { background: #eff6ff; color: #1e3a8a; font-weight: 600; }
+    tbody tr:nth-child(even) td { background: #fafbfc; }
+    code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
+    pre { background: #111827; color: #e5e7eb; padding: 10px; border-radius: 8px; overflow-x: auto; }
+    a { color: #2563eb; }
+    img { max-width: 100%; }
+    .card, .box, .panel { border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; }
+  `
+
+  /**
+   * ```html 代码块 → 沙箱预览。模型输出一律按不可信内容处理：iframe 用
+   * sandbox=""（既不给 allow-scripts 也不给 allow-same-origin），srcdoc 里再加
+   * CSP 禁止脚本、表单提交与外部请求，只放行内联样式与同源/data 图片。因此
+   * HTML 能正常排版显示，却拿不到本页 DOM/Cookie，也无法外发数据。默认高度
+   * 320px 且可拖拽调整，并可切换查看源码。
+   */
+  function renderHtmlBlock(body) {
+    const doc = '<!doctype html><meta charset="utf-8">'
+      + '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; img-src \'self\' data: https:; font-src \'self\' data:; form-action \'none\'; base-uri \'none\'">'
+      + `<style>${HTML_PREVIEW_CSS}</style>`
+      + body
+    return '<div class="html-block">'
+      + `<div class="html-bar"><span>${t('htmlPreview')}</span><button type="button" class="html-src-toggle">${t('htmlSource')}</button></div>`
+      + `<iframe class="html-frame" sandbox="" referrerpolicy="no-referrer" loading="lazy" title="HTML 预览" srcdoc="${esc(doc)}"></iframe>`
+      + `<pre class="html-src" hidden><code>${esc(body)}</code></pre>`
+      + '</div>'
   }
 
   /** Render a ```chart JSON block into a simple horizontal bar list. */
@@ -1078,6 +1139,19 @@
     if (image) { event.preventDefault(); openViewer(image); return }
     const diagram = target.closest('.bubble .mermaid-src.mermaid-done')
     if (diagram) { event.preventDefault(); openViewer(diagram) }
+  })
+
+  // 事件委托：HTML 预览的"查看源码 / 收起源码"切换
+  chatEl.addEventListener('click', event => {
+    const target = event.target
+    if (!(target instanceof Element)) return
+    const toggle = target.closest('.html-src-toggle')
+    if (!toggle) return
+    const block = toggle.closest('.html-block')
+    const source = block && block.querySelector('.html-src')
+    if (!source) return
+    source.hidden = !source.hidden
+    toggle.textContent = source.hidden ? t('htmlSource') : t('htmlSourceHide')
   })
 
   // 图片加载失败（源站已删图 / 网络不通）：降级为文字提示，避免破图图标

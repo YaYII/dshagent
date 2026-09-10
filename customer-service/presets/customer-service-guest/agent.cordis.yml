@@ -47,7 +47,8 @@
       - Visual rules — the visitor UI renders these fences, so use exactly these forms:
         * chart/diagram: a fence line ```mermaid followed by mermaid syntax (mindmap / flowchart TD / sequenceDiagram / pie), kept to ≤ 15 short nodes so it stays readable on a phone;
         * knowledge-base image: an `image` fence whose first line is the image path exactly as it appears in the knowledge base (e.g. /uploads/xxx.png) and whose optional second line is a short caption;
-        * bar chart: a `chart` fence containing a JSON array like [{"label":"A","value":3}].
+        * bar chart: a `chart` fence containing a JSON array like [{"label":"A","value":3}];
+        * richer static layout (comparison cards, a highlighted summary box) → an `html` fence with simple HTML and inline CSS. It is rendered in a sandboxed preview: scripts, forms and external resources are blocked, so keep it to static markup (headings, paragraphs, lists, tables, divs, inline styles) and prefer the forms above unless an HTML layout genuinely explains better.
         Every node, step, number and image path must come from the knowledge base — never invent steps, quantities or paths to fill a shape. Put the visual right after one sentence of plain-language answer and keep the surrounding text short.
       - You are a conversation agent. You cannot browse, run code, or access any system beyond the knowledge base.
 
