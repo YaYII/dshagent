@@ -114,6 +114,10 @@
     color: #e5e7eb; font-size: 12.5px; font-variant-numeric: tabular-nums;
     background: rgba(0, 0, 0, .45); padding: 3px 10px; border-radius: 999px;
   }
+  /* 阅读器里图片取不到：显示提示文字而不是一个白点占位 */
+  .viewer-stage.broken { max-width: 80vw; color: #e5e7eb; font-size: 13px; text-align: center; white-space: pre-line; transform: none; }
+  .viewer-stage.broken img { display: none; }
+  .viewer-stage.broken::before { content: attr(data-fallback); display: block; line-height: 1.7; }
   @media (max-width: 640px) { .viewer-bar button { width: 36px; height: 36px; font-size: 15px; } }
   /* 知识库图片（```image 块）：点击可放大；加载失败降级成提示文字，不留破图 */
   .bubble .kb-image { margin: 10px 0; }
@@ -435,7 +439,7 @@
 
   // ── 版本标识：每次发布递增，方便定位访客用的是哪个版本 ──────────────
   // 前端（此页面）版本号：改页面后 +1；服务端版本由 guest-server 注入。
-  const APP_VERSION = 'v2.4.0'
+  const APP_VERSION = 'v2.4.1'
   const svcAgentEl = document.getElementById('svcAgent')
   const svcVerEl = document.getElementById('svcVer')
   if (svcVerEl) svcVerEl.textContent = `前端 ${APP_VERSION} · 服务 --`
@@ -778,12 +782,30 @@
       content.src = node.currentSrc || node.src
       content.alt = node.alt || ''
       content.draggable = false
+      // 取不到的图在深色底上只会留一个白点占位：直接给出可读提示
+      content.addEventListener('error', () => {
+        stage.classList.add('broken')
+        stage.setAttribute('data-fallback', `${t('imageUnavailable')}\n${viewer.src}`)
+      })
       viewer.src = content.src
     } else {
       content = source.cloneNode(true)
-      // 去掉固定宽高，交给 CSS 约束到视口内（保留 viewBox 比例）
-      content.removeAttribute('width')
-      content.removeAttribute('height')
+      // 只带 viewBox 的 SVG 没有固有尺寸，放进阅读器会塌成 12x12 的小白点
+      // （实测：内联 738x331 → 阅读器 12x12）。这里用 viewBox 尺寸补回固有宽高，
+      // 再由 CSS 的 max-width/max-height 等比缩到视口内。
+      const box = (content.getAttribute('viewBox') || '').trim().split(/[\s,]+/).filter(Boolean).map(Number)
+      if (box.length === 4 && box[2] > 0 && box[3] > 0) {
+        content.setAttribute('width', String(box[2]))
+        content.setAttribute('height', String(box[3]))
+      } else {
+        const rect = source.getBoundingClientRect()
+        content.setAttribute('width', String(Math.max(1, Math.round(rect.width))))
+        content.setAttribute('height', String(Math.max(1, Math.round(rect.height))))
+      }
+      // 去掉 mermaid 自带的 max-width 内联样式（其它内联样式保留），尺寸交给阅读器 CSS
+      const inlineStyle = content.getAttribute('style') || ''
+      content.setAttribute('style', inlineStyle.replace(/max-width\s*:[^;]+;?/i, ''))
+      content.setAttribute('preserveAspectRatio', 'xMidYMid meet')
       viewer.src = ''
     }
     stage.appendChild(content)
