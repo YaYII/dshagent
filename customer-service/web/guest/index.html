@@ -115,9 +115,11 @@
   .bubble .html-bar button { border: 1px solid var(--border); background: #fff; border-radius: 7px; padding: 3px 9px;
     font-size: 12px; color: #475569; cursor: pointer; }
   .bubble .html-bar button:hover { border-color: var(--brand); color: var(--brand); }
-  /* 预览高度：默认按视口自适应（脚本回传内容高度后再精确贴合，见 applyHtmlFrameHeight） */
+  /* 预览高度：默认按视口自适应（脚本回传内容高度后再精确贴合，见 applyHtmlFrameHeight）。
+     注意：这里绝不能加 height 过渡——高度变化会触发 ResizeObserver 重测，过渡期间
+     又持续上报新高度，两者会叠成无限增长的抖动（实测每 100ms 涨 2px）。 */
   .bubble .html-frame { display: block; width: 100%; border: 0; background: #fff;
-    height: clamp(180px, 42vh, 520px); transition: height .18s ease; }
+    height: clamp(180px, 42vh, 520px); }
   .bubble .html-src { margin: 0; border-radius: 0; }
   /* 图片阅读器：可点开的图片/图表 + 深色毛玻璃底的放大查看层 */
   .bubble img, .bubble .mermaid-src.mermaid-done { cursor: zoom-in; }
@@ -153,7 +155,7 @@
   /* 知识库图片（```image 块）：点击可放大；加载失败降级成提示文字，不留破图 */
   .bubble .kb-image { position: relative; display: inline-block; margin: 12px 0; padding: 8px; background: #fff;
     border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 1px 3px rgba(15, 23, 42, .06); }
-  .bubble .kb-image img { display: block; width: 100%; max-width: 420px; border-radius: 8px; }
+  .bubble .kb-image img { display: block; width: 100%; max-width: 420px; height: auto; border-radius: 8px; }
   .bubble .kb-image figcaption { margin-top: 6px; font-size: 12px; color: var(--muted); text-align: center; }
   .bubble .kb-image.broken img { display: none; }
   .bubble .kb-image.broken::before {
@@ -483,7 +485,7 @@
 
   // ── 版本标识：每次发布递增，方便定位访客用的是哪个版本 ──────────────
   // 前端（此页面）版本号：改页面后 +1；服务端版本由 guest-server 注入。
-  const APP_VERSION = 'v2.7.1'
+  const APP_VERSION = 'v2.7.3'
   const svcAgentEl = document.getElementById('svcAgent')
   const svcVerEl = document.getElementById('svcVer')
   if (svcVerEl) svcVerEl.textContent = `前端 ${APP_VERSION} · 服务 --`
@@ -640,7 +642,7 @@
     t = t.replace(/`([^`]+)`/g, '<code>$1</code>')
     t = t.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_m, alt, url) => {
       if (/^(https?:|data:image\/|\/)/.test(url)) {
-        return `<img src="${esc(imageSrcOf(url))}" alt="${esc(alt)}" loading="lazy">`
+        return `<img src="${esc(imageSrcOf(url))}" alt="${esc(alt)}" loading="lazy" decoding="async" width="1000" height="560">`
       }
       return `[${esc(alt)}]`
     })
@@ -664,7 +666,8 @@
       || (/^(https?:|\/)/.test(raw) && /\.(png|jpe?g|gif|webp|avif|svg|bmp)(\?|#|$)/i.test(raw))
     if (!looksLikeImage) return `<pre><code>${esc(body)}</code></pre>`
     const caption = lines.slice(1).join(' ')
-    return `<figure class="kb-image"><img src="${esc(imageSrcOf(raw))}" alt="${esc(caption)}" loading="lazy">`
+    // width/height 属性让浏览器提前按比例预留空间：图片到达时不再把下方内容顶下去
+    return `<figure class="kb-image"><img src="${esc(imageSrcOf(raw))}" alt="${esc(caption)}" loading="lazy" decoding="async" width="1000" height="560">`
       + (caption ? `<figcaption>${esc(caption)}</figcaption>` : '')
       + '</figure>'
   }
@@ -706,9 +709,13 @@
    * nonce 锁定），模型自己写的脚本/内联事件仍被 CSP 拒绝执行。
    */
   const HTML_HEIGHT_REPORTER = 'addEventListener("load",function(){'
-    + 'function report(){parent.postMessage({dshHtmlHeight:document.documentElement.scrollHeight},"*")}'
+    + 'var last=0;'
+    + 'function report(){var h=document.documentElement.scrollHeight;if(h===last)return;last=h;'
+    + 'parent.postMessage({dshHtmlHeight:h},"*")}'
     + 'report();addEventListener("resize",report);'
-    + 'if(window.ResizeObserver){new ResizeObserver(report).observe(document.documentElement)}'
+    + 'if(window.ResizeObserver){new ResizeObserver(function(){'
+    + 'requestAnimationFrame(report)})'
+    + '.observe(document.body||document.documentElement)}'
     + '},false);'
 
   /**
@@ -738,7 +745,11 @@
     const content = Number(frame.dataset.contentHeight || 0)
     if (!content) return
     const max = Math.min(Math.round(window.innerHeight * 0.85), 900)
-    frame.style.height = `${Math.min(Math.max(content + 2, 120), max)}px`
+    const target = Math.min(Math.max(content + 2, 120), max)
+    // 小于 2px 的变化忽略：亚像素级来回会把「测量 → 设高 → 再测量」变成抖动
+    if (Math.abs(target - Number(frame.dataset.appliedHeight || 0)) < 2) return
+    frame.dataset.appliedHeight = String(target)
+    frame.style.height = `${target}px`
     frame.dataset.clamped = content + 2 > max ? '1' : ''
   }
 
