@@ -115,7 +115,9 @@
   .bubble .html-bar button { border: 1px solid var(--border); background: #fff; border-radius: 7px; padding: 3px 9px;
     font-size: 12px; color: #475569; cursor: pointer; }
   .bubble .html-bar button:hover { border-color: var(--brand); color: var(--brand); }
-  .bubble .html-frame { display: block; width: 100%; height: 320px; border: 0; background: #fff; resize: vertical; overflow: auto; }
+  /* 预览高度：默认按视口自适应（脚本回传内容高度后再精确贴合，见 applyHtmlFrameHeight） */
+  .bubble .html-frame { display: block; width: 100%; border: 0; background: #fff;
+    height: clamp(180px, 42vh, 520px); transition: height .18s ease; }
   .bubble .html-src { margin: 0; border-radius: 0; }
   /* 图片阅读器：可点开的图片/图表 + 深色毛玻璃底的放大查看层 */
   .bubble img, .bubble .mermaid-src.mermaid-done { cursor: zoom-in; }
@@ -481,7 +483,7 @@
 
   // ── 版本标识：每次发布递增，方便定位访客用的是哪个版本 ──────────────
   // 前端（此页面）版本号：改页面后 +1；服务端版本由 guest-server 注入。
-  const APP_VERSION = 'v2.7.0'
+  const APP_VERSION = 'v2.7.1'
   const svcAgentEl = document.getElementById('svcAgent')
   const svcVerEl = document.getElementById('svcVer')
   if (svcVerEl) svcVerEl.textContent = `前端 ${APP_VERSION} · 服务 --`
@@ -667,43 +669,95 @@
       + '</figure>'
   }
 
-  /** 沙箱预览里的基础排版：模型 HTML 没带样式时也不至于是一坨裸标签。 */
+  /** 沙箱预览里的基础排版：模型 HTML 没带样式时也不至于是一坨裸标签，并且
+   * 在窄屏（手机）上不撑破容器——宽内容改为内部滚动而非溢出。 */
   const HTML_PREVIEW_CSS = `
     :root { color-scheme: light; }
-    body { margin: 0; padding: 12px 14px; font: 14px/1.65 "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", system-ui, -apple-system, "Segoe UI", sans-serif; color: #1f2937; background: #fff; }
+    *, *::before, *::after { box-sizing: border-box; }
+    html { max-width: 100%; }
+    body { margin: 0; padding: 12px 14px; max-width: 100%; overflow-x: auto; background: #fff; color: #1f2937;
+      font: 14px/1.65 "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", system-ui, -apple-system, "Segoe UI", sans-serif; }
+    /* 顶层元素占满可用宽度（自带的 max-width 仍生效并居中），窄屏自动变成单列 */
+    body > * { max-width: 100%; margin-inline: auto; }
     h1, h2, h3, h4 { margin: 0 0 8px; font-weight: 600; line-height: 1.35; }
     h1 { font-size: 18px } h2 { font-size: 16px } h3 { font-size: 15px }
     p, ul, ol { margin: 0 0 10px } ul, ol { padding-left: 20px }
-    table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 13px; border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden; }
-    th, td { border-bottom: 1px solid #e5e7eb; padding: 8px 12px; text-align: left; }
+    table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 13px; border: 1px solid #e5e7eb; border-radius: 10px; }
+    th, td { border-bottom: 1px solid #e5e7eb; padding: 8px 12px; text-align: left; word-break: break-word; }
     tr:last-child td { border-bottom: 0; }
     th { background: #eff6ff; color: #1e3a8a; font-weight: 600; }
     tbody tr:nth-child(even) td { background: #fafbfc; }
     code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
     pre { background: #111827; color: #e5e7eb; padding: 10px; border-radius: 8px; overflow-x: auto; }
     a { color: #2563eb; }
-    img { max-width: 100%; }
+    img, svg, video, canvas { max-width: 100%; height: auto; }
     .card, .box, .panel { border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; }
+    /* 模型常用的多列布局在窄屏退化为单列 */
+    @media (max-width: 640px) {
+      [style*="display:flex"], [style*="display: flex"], .grid, .row, .cols { flex-direction: column !important; }
+      [style*="grid-template-columns"] { grid-template-columns: 1fr !important; }
+    }
   `
 
   /**
+   * 高度上报脚本：沙箱 iframe 是跨源隔离的（opaque origin），父页面既读不到
+   * contentDocument，子文档也不能主动访问父页面。唯一安全的自动测量方式是给
+   * 它一次 postMessage 的机会——所以只放行这一段由本页写入的脚本（CSP 用随机
+   * nonce 锁定），模型自己写的脚本/内联事件仍被 CSP 拒绝执行。
+   */
+  const HTML_HEIGHT_REPORTER = 'addEventListener("load",function(){'
+    + 'function report(){parent.postMessage({dshHtmlHeight:document.documentElement.scrollHeight},"*")}'
+    + 'report();addEventListener("resize",report);'
+    + 'if(window.ResizeObserver){new ResizeObserver(report).observe(document.documentElement)}'
+    + '},false);'
+
+  /**
    * ```html 代码块 → 沙箱预览。模型输出一律按不可信内容处理：iframe 用
-   * sandbox=""（既不给 allow-scripts 也不给 allow-same-origin），srcdoc 里再加
-   * CSP 禁止脚本、表单提交与外部请求，只放行内联样式与同源/data 图片。因此
-   * HTML 能正常排版显示，却拿不到本页 DOM/Cookie，也无法外发数据。默认高度
-   * 320px 且可拖拽调整，并可切换查看源码。
+   * sandbox="allow-scripts"（只给脚本执行权、绝不给 same-origin），srcdoc 内再用
+   * CSP 把脚本限制到本页写入的那一段（随机 nonce），并禁止表单提交、外部请求与
+   * base-uri。因此 HTML 能正常排版、能自适应高度，却拿不到本页 DOM/Cookie。
+   * 高度由子文档回传、父页面按视口夹紧（手机不会一屏占满，PC 不会截断内容）。
    */
   function renderHtmlBlock(body) {
+    const nonce = Math.random().toString(36).slice(2) + Date.now().toString(36)
     const doc = '<!doctype html><meta charset="utf-8">'
-      + '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; img-src \'self\' data: https:; font-src \'self\' data:; form-action \'none\'; base-uri \'none\'">'
+      + `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; form-action 'none'; base-uri 'none'; script-src 'nonce-${nonce}'">`
       + `<style>${HTML_PREVIEW_CSS}</style>`
       + body
+      // 注意：字符串里必须是 <\/script>，否则 HTML 解析器会提前结束本页脚本块
+      + `<script nonce="${nonce}">${HTML_HEIGHT_REPORTER}<\/script>`
     return '<div class="html-block">'
       + `<div class="html-bar"><span>${t('htmlPreview')}</span><button type="button" class="html-src-toggle">${t('htmlSource')}</button></div>`
-      + `<iframe class="html-frame" sandbox="" referrerpolicy="no-referrer" loading="lazy" title="HTML 预览" srcdoc="${esc(doc)}"></iframe>`
+      + `<iframe class="html-frame" sandbox="allow-scripts" referrerpolicy="no-referrer" loading="lazy" title="HTML 预览" srcdoc="${esc(doc)}"></iframe>`
       + `<pre class="html-src" hidden><code>${esc(body)}</code></pre>`
       + '</div>'
   }
+
+  /** 把某个预览 iframe 的高度设为「内容高度」，并按当前视口夹紧。 */
+  function applyHtmlFrameHeight(frame) {
+    const content = Number(frame.dataset.contentHeight || 0)
+    if (!content) return
+    const max = Math.min(Math.round(window.innerHeight * 0.85), 900)
+    frame.style.height = `${Math.min(Math.max(content + 2, 120), max)}px`
+    frame.dataset.clamped = content + 2 > max ? '1' : ''
+  }
+
+  /**
+   * 接收预览子文档回传的内容高度。只认本页自己的 iframe（比对 event.source），
+   * 沙箱 origin 为 null 不可作为判据；窗口尺寸变化时按新视口重新夹紧。
+   */
+  window.addEventListener('message', event => {
+    const data = event.data
+    if (!data || typeof data.dshHtmlHeight !== 'number') return
+    const frame = [...document.querySelectorAll('.html-frame')].find(item => item.contentWindow === event.source)
+    if (!frame) return
+    frame.dataset.contentHeight = String(Math.max(0, Math.round(data.dshHtmlHeight)))
+    applyHtmlFrameHeight(frame)
+  })
+
+  window.addEventListener('resize', () => {
+    for (const frame of document.querySelectorAll('.html-frame')) applyHtmlFrameHeight(frame)
+  })
 
   /** Render a ```chart JSON block into a simple horizontal bar list. */
   function renderChart(body) {
