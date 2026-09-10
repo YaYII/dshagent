@@ -273,6 +273,30 @@ export function apply(ctx: Context, config: Config): void {
   /** Server build stamp surfaced to the guest UI badge (see Config.serviceVersion). */
   const serviceVersion = config.serviceVersion ?? 'unknown'
 
+  /**
+   * Derived-history cache. Building the message list decompresses and parses the
+   * whole session log (a ~100KB zstd log costs ~0.5s), and the guest UI reads
+   * history on every page refresh and repeatedly while recovering a dropped
+   * stream. While a turn is in flight the log is still being appended, so those
+   * reads parse fresh and store nothing; a finished turn drops the snapshot, and
+   * the next idle read repopulates it.
+   */
+  const historyCache = new Map<string, { at: number; messages: Array<{ role: string; text: string }> }>()
+  const activeTurns = new Set<string>()
+  const HISTORY_CACHE_MAX = 200
+
+  /** Mark a turn as in flight (history reads bypass the cache). */
+  const beginTurn = (sessionId: string): void => {
+    activeTurns.add(sessionId)
+    historyCache.delete(sessionId)
+  }
+
+  /** Drop the turn marker and its snapshot so the next read includes the reply. */
+  const endTurn = (sessionId: string): void => {
+    activeTurns.delete(sessionId)
+    historyCache.delete(sessionId)
+  }
+
   /** Drop a guest session (agent + map entry). */
   const dropGuest = async (sessionId: string): Promise<void> => {
     const guest = guests.get(sessionId)
@@ -371,19 +395,24 @@ export function apply(ctx: Context, config: Config): void {
 
   /** Run one chat turn and return the assistant reply plus cited sources. */
   const runChat = async (sessionId: string, text: string): Promise<{ reply: string; sources: string[] }> => {
-    await ensureGuest(sessionId)
-    const guest = guests.get(sessionId)
-    if (guest === undefined) throw new Error('unknown session')
-    const agent = ctx.agents.get(sessionId as never)
-    if (agent === undefined) throw new Error('session agent is not live')
-    const message = createUserMessage({
-      content: [{ type: 'text', text }],
-      source: { kind: 'user' },
-    })
-    agent.followup(message)
-    await agent.whenIdle()
-    const reply = await readLatestAssistantText(sessionId as never)
-    return { reply, sources: extractSources(reply) }
+    beginTurn(sessionId)
+    try {
+      await ensureGuest(sessionId)
+      const guest = guests.get(sessionId)
+      if (guest === undefined) throw new Error('unknown session')
+      const agent = ctx.agents.get(sessionId as never)
+      if (agent === undefined) throw new Error('session agent is not live')
+      const message = createUserMessage({
+        content: [{ type: 'text', text }],
+        source: { kind: 'user' },
+      })
+      agent.followup(message)
+      await agent.whenIdle()
+      const reply = await readLatestAssistantText(sessionId as never)
+      return { reply, sources: extractSources(reply) }
+    } finally {
+      endTurn(sessionId)
+    }
   }
 
   /**
@@ -410,6 +439,7 @@ export function apply(ctx: Context, config: Config): void {
     streamers.set(sessionId, (_event, data) => {
       onDelta(String((data as { text?: string }).text ?? ''))
     })
+    beginTurn(sessionId)
     try {
       const message = createUserMessage({
         content: [{ type: 'text', text }],
@@ -421,6 +451,7 @@ export function apply(ctx: Context, config: Config): void {
       return { reply, sources: extractSources(reply) }
     } finally {
       streamers.delete(sessionId)
+      endTurn(sessionId)
     }
   }
 
@@ -479,7 +510,7 @@ export function apply(ctx: Context, config: Config): void {
    * session log.
    * @returns `[{ role: 'user'|'assistant', text }]` in chronological order.
    */
-  const readHistory = async (sessionId: string): Promise<Array<{ role: string; text: string }>> => {
+  const readHistoryFromLog = async (sessionId: string): Promise<Array<{ role: string; text: string }>> => {
     if (!isGuestSessionId(sessionId)) throw new Error('unknown session')
     const snapshot = await ctx.sessionQuery.readSession(sessionId as never)
     const events = (snapshot as unknown as { events: Array<Record<string, unknown>> }).events ?? []
@@ -501,6 +532,29 @@ export function apply(ctx: Context, config: Config): void {
           .map(b => b.text as string)
           .join('')
         if (text.length > 0) messages.push({ role: 'assistant', text })
+      }
+    }
+    return messages
+  }
+
+  /**
+   * Message list for a session, served from the derived cache once the session
+   * is idle (a refresh then costs ~0ms instead of re-parsing the whole log).
+   * Reads taken while a turn is in flight always parse the log, so a recovering
+   * client never receives a snapshot older than the turn it is waiting for.
+   */
+  const readHistory = async (sessionId: string): Promise<Array<{ role: string; text: string }>> => {
+    if (!isGuestSessionId(sessionId)) throw new Error('unknown session')
+    if (!activeTurns.has(sessionId)) {
+      const cached = historyCache.get(sessionId)
+      if (cached !== undefined) return cached.messages
+    }
+    const messages = await readHistoryFromLog(sessionId)
+    if (!activeTurns.has(sessionId)) {
+      historyCache.set(sessionId, { at: Date.now(), messages })
+      if (historyCache.size > HISTORY_CACHE_MAX) {
+        const oldest = [...historyCache.entries()].sort((a, b) => a[1].at - b[1].at)[0]
+        if (oldest !== undefined) historyCache.delete(oldest[0])
       }
     }
     return messages

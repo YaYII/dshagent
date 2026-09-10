@@ -439,7 +439,7 @@
 
   // ── 版本标识：每次发布递增，方便定位访客用的是哪个版本 ──────────────
   // 前端（此页面）版本号：改页面后 +1；服务端版本由 guest-server 注入。
-  const APP_VERSION = 'v2.4.1'
+  const APP_VERSION = 'v2.5.0'
   const svcAgentEl = document.getElementById('svcAgent')
   const svcVerEl = document.getElementById('svcVer')
   if (svcVerEl) svcVerEl.textContent = `前端 ${APP_VERSION} · 服务 --`
@@ -659,6 +659,46 @@
   const MERMAID_ASSET = 'assets/mermaid-11.16.0.min.js'
   let mermaidPromise = null
   let diagramSeq = 0
+  let diagramObserver = null
+
+  // 已渲染 SVG 的本地缓存：同一张图（同源码 + 同库版本 + 同渲染选项）只渲染一次，
+  // 刷新/重进页面直接复用。localStorage 只有 ~5MB，因此限制条数并跳过超大图。
+  const SVG_CACHE_PREFIX = 'dshagent_svg_'
+  const SVG_CACHE_INDEX = 'dshagent_svg_index'
+  const SVG_CACHE_MAX_ENTRIES = 40
+  const SVG_CACHE_MAX_CHARS = 150 * 1024
+  const MERMAID_RENDER_FINGERPRINT = `${MERMAID_ASSET}|strict|default`
+
+  /** 供缓存键使用的短哈希（FNV-1a，纯前端同步计算，无需加密强度）。 */
+  function hashKey(text) {
+    let hash = 0x811c9dc5
+    for (let i = 0; i < text.length; i++) {
+      hash ^= text.charCodeAt(i)
+      hash = Math.imul(hash, 0x01000193)
+    }
+    return (hash >>> 0).toString(36)
+  }
+
+  /** 读取某段 mermaid 源码已渲染好的 SVG（未缓存返回 null）。 */
+  function svgCacheGet(source) {
+    try { return localStorage.getItem(SVG_CACHE_PREFIX + hashKey(`${MERMAID_RENDER_FINGERPRINT}|${source}`)) } catch { return null }
+  }
+
+  /** 缓存渲染结果，按 LRU 索引淘汰最旧的条目；配额满/隐私模式时静默放弃。 */
+  function svgCachePut(source, svg) {
+    if (typeof svg !== 'string' || svg.length > SVG_CACHE_MAX_CHARS) return
+    try {
+      const key = SVG_CACHE_PREFIX + hashKey(`${MERMAID_RENDER_FINGERPRINT}|${source}`)
+      localStorage.setItem(key, svg)
+      const index = JSON.parse(localStorage.getItem(SVG_CACHE_INDEX) || '[]').filter(item => item !== key)
+      index.push(key)
+      while (index.length > SVG_CACHE_MAX_ENTRIES) {
+        const stale = index.shift()
+        if (stale) localStorage.removeItem(stale)
+      }
+      localStorage.setItem(SVG_CACHE_INDEX, JSON.stringify(index))
+    } catch { /* 隐私模式或配额已满：跳过缓存，下次照常渲染 */ }
+  }
 
   /** 懒加载 mermaid 库（同源相对路径，反代前缀自适应）；失败返回 null。 */
   function loadMermaid() {
@@ -681,22 +721,62 @@
   }
 
   /**
-   * 把 root 内还没渲染的 mermaid 块转成 SVG。流式回答期间保持代码块（避免
-   * 每个 delta 重排图），只在回答定稿（done / 断流恢复 / 历史恢复）时调用。
+   * 把 root 内还没渲染的 mermaid 块转成 SVG。渲染结果会按源码缓存（见
+   * svgCacheGet/Put）：刷新时命中缓存就直接贴回 SVG，既不再加载 3.5MB 的库，
+   * 也不重新解析布局。流式回答期间保持代码块（避免每个 delta 重排图），只在
+   * 回答定稿（done / 断流恢复）时立即渲染；恢复历史时只渲染进入视口的图。
+   * @param root - 待渲染的容器
+   * @param options.lazy - true 时（历史恢复）交给 IntersectionObserver 按需渲染
    */
-  async function renderDiagrams(root) {
+  async function renderDiagrams(root, options = {}) {
     if (!root) return
-    const nodes = root.querySelectorAll('.mermaid-src:not([data-rendered])')
+    const nodes = [...root.querySelectorAll('.mermaid-src:not([data-rendered])')]
     if (nodes.length === 0) return
+    const misses = []
+    for (const node of nodes) {
+      const source = node.getAttribute('data-src') || ''
+      const cached = svgCacheGet(source)
+      if (cached !== null) {
+        // 已经渲染过的图：直接复用，无需库、无需重新布局
+        node.setAttribute('data-rendered', '1')
+        node.innerHTML = cached
+        node.classList.add('mermaid-done')
+      } else {
+        misses.push(node)
+      }
+    }
+    if (misses.length === 0) return
+    if (options.lazy && typeof IntersectionObserver === 'function') observeDiagrams(misses)
+    else await renderMermaidNodes(misses)
+  }
+
+  /** 观察待渲染的图，进入视口（提前 300px）才真正渲染。 */
+  function observeDiagrams(nodes) {
+    if (!diagramObserver) {
+      diagramObserver = new IntersectionObserver(entries => {
+        const visible = entries.filter(entry => entry.isIntersecting).map(entry => entry.target)
+        for (const node of visible) diagramObserver.unobserve(node)
+        if (visible.length > 0) renderMermaidNodes(visible)
+      }, { rootMargin: '300px 0px' })
+    }
+    for (const node of nodes) {
+      node.setAttribute('data-rendered', '1')
+      diagramObserver.observe(node)
+    }
+  }
+
+  /** 真正调用 mermaid 渲染这些节点，并把结果写入缓存。 */
+  async function renderMermaidNodes(nodes) {
     let lib
     try { lib = await loadMermaid() } catch { return /* 库拿不到：保留代码块 */ }
     for (const node of nodes) {
-      node.setAttribute('data-rendered', '1')
+      if (node.classList.contains('mermaid-done')) continue
       const source = node.getAttribute('data-src') || ''
       try {
         const { svg } = await lib.render(`dsh-mmd-${++diagramSeq}`, source)
         node.innerHTML = svg
         node.classList.add('mermaid-done')
+        svgCachePut(source, svg)
       } catch (err) {
         // 语法错误 / 渲染异常：保留原始代码块，控制台留证据
         console.warn('[guest] mermaid 渲染失败，保留代码块：', err && err.message)
@@ -1009,7 +1089,7 @@
           addMessage('user', renderMarkdown(m.text))
         }
       }
-      renderDiagrams(chatEl)
+      renderDiagrams(chatEl, { lazy: true })
     } catch { /* offline / server restarted: keep session id, chat will resume it */ }
     finally {
       // addMessage removes welcome; if nothing was restored, show the
