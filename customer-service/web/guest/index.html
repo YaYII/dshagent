@@ -110,17 +110,13 @@
   /* HTML 预览（```html 块）：沙箱 iframe，可拖拽调高度、可切换源码 */
   .bubble .html-block { margin: 12px 0; border: 1px solid var(--border); border-radius: 12px; background: #fff; overflow: hidden;
     box-shadow: 0 1px 3px rgba(15, 23, 42, .06); }
-  .bubble .html-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px;
+  .bubble .html-bar { display: flex; align-items: center; padding: 6px 10px;
     background: #f8fafc; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--muted); }
-  .bubble .html-bar button { border: 1px solid var(--border); background: #fff; border-radius: 7px; padding: 3px 9px;
-    font-size: 12px; color: #475569; cursor: pointer; }
-  .bubble .html-bar button:hover { border-color: var(--brand); color: var(--brand); }
   /* 预览高度：默认按视口自适应（脚本回传内容高度后再精确贴合，见 applyHtmlFrameHeight）。
      注意：这里绝不能加 height 过渡——高度变化会触发 ResizeObserver 重测，过渡期间
      又持续上报新高度，两者会叠成无限增长的抖动（实测每 100ms 涨 2px）。 */
   .bubble .html-frame { display: block; width: 100%; border: 0; background: #fff;
     height: clamp(180px, 42vh, 520px); }
-  .bubble .html-src { margin: 0; border-radius: 0; }
   /* 图片阅读器：可点开的图片/图表 + 深色毛玻璃底的放大查看层 */
   .bubble img, .bubble .mermaid-src.mermaid-done { cursor: zoom-in; }
   .viewer {
@@ -281,8 +277,6 @@
       viewerDownload: '下载图片',
       viewerClose: '关闭（Esc）',
       htmlPreview: 'HTML 预览',
-      htmlSource: '查看源码',
-      htmlSourceHide: '收起源码',
       imageUnavailable: '图片暂时无法显示（源站可能已移除该图）',
       // 建议问题（欢迎页快捷提问），点击即发送
       suggestions: ['客服热线是多少？', '如何缴交电费？', '遇到停电怎么办？', '电动车如何充电？'],
@@ -310,8 +304,6 @@
       viewerDownload: '下載圖片',
       viewerClose: '關閉（Esc）',
       htmlPreview: 'HTML 預覽',
-      htmlSource: '檢視原始碼',
-      htmlSourceHide: '收起原始碼',
       imageUnavailable: '圖片暫時無法顯示（來源站可能已移除該圖）',
       // 建議問題（歡迎頁快捷提問），點擊即傳送
       suggestions: ['客服熱線是多少？', '如何繳交電費？', '遇到停電怎麼辦？', '電動車如何充電？'],
@@ -338,8 +330,6 @@
       viewerDownload: 'Download image',
       viewerClose: 'Close (Esc)',
       htmlPreview: 'HTML preview',
-      htmlSource: 'View source',
-      htmlSourceHide: 'Hide source',
       imageUnavailable: 'Image unavailable (it may have been removed from the source site)',
       suggestions: ['What is the customer service hotline?', 'How can I pay my electricity bill?', 'What should I do during a power outage?', 'How do I charge my electric vehicle?'],
     },
@@ -365,8 +355,6 @@
       viewerDownload: 'Transferir imagem',
       viewerClose: 'Fechar (Esc)',
       htmlPreview: 'Pré-visualização HTML',
-      htmlSource: 'Ver código',
-      htmlSourceHide: 'Ocultar código',
       imageUnavailable: 'Imagem indisponível (pode ter sido removida do site de origem)',
       suggestions: ['Qual é a linha de apoio ao cliente?', 'Como posso pagar a conta de eletricidade?', 'O que fazer durante uma falha de energia?', 'Como carrego o meu veículo elétrico?'],
     },
@@ -485,7 +473,7 @@
 
   // ── 版本标识：每次发布递增，方便定位访客用的是哪个版本 ──────────────
   // 前端（此页面）版本号：改页面后 +1；服务端版本由 guest-server 注入。
-  const APP_VERSION = 'v2.7.3'
+  const APP_VERSION = 'v2.7.4'
   const svcAgentEl = document.getElementById('svcAgent')
   const svcVerEl = document.getElementById('svcVer')
   if (svcVerEl) svcVerEl.textContent = `前端 ${APP_VERSION} · 服务 --`
@@ -734,9 +722,8 @@
       // 注意：字符串里必须是 <\/script>，否则 HTML 解析器会提前结束本页脚本块
       + `<script nonce="${nonce}">${HTML_HEIGHT_REPORTER}<\/script>`
     return '<div class="html-block">'
-      + `<div class="html-bar"><span>${t('htmlPreview')}</span><button type="button" class="html-src-toggle">${t('htmlSource')}</button></div>`
+      + `<div class="html-bar"><span>${t('htmlPreview')}</span></div>`
       + `<iframe class="html-frame" sandbox="allow-scripts" referrerpolicy="no-referrer" loading="lazy" title="HTML 预览" srcdoc="${esc(doc)}"></iframe>`
-      + `<pre class="html-src" hidden><code>${esc(body)}</code></pre>`
       + '</div>'
   }
 
@@ -1204,19 +1191,6 @@
     if (image) { event.preventDefault(); openViewer(image); return }
     const diagram = target.closest('.bubble .mermaid-src.mermaid-done')
     if (diagram) { event.preventDefault(); openViewer(diagram) }
-  })
-
-  // 事件委托：HTML 预览的"查看源码 / 收起源码"切换
-  chatEl.addEventListener('click', event => {
-    const target = event.target
-    if (!(target instanceof Element)) return
-    const toggle = target.closest('.html-src-toggle')
-    if (!toggle) return
-    const block = toggle.closest('.html-block')
-    const source = block && block.querySelector('.html-src')
-    if (!source) return
-    source.hidden = !source.hidden
-    toggle.textContent = source.hidden ? t('htmlSource') : t('htmlSourceHide')
   })
 
   // 图片加载失败（源站已删图 / 网络不通）：降级为文字提示，避免破图图标
