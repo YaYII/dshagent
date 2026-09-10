@@ -57,6 +57,13 @@
           .glass            — frosted-glass panel with an animated gradient border
           .stat > .num/.label, .badge (+ .gold/.green), .timeline, .divider, .glow-text — key figures, status chips, step timelines, separators, glowing text
         Aim for: a .hero (with .particles) + a couple of .glass or .tilt cards + one .stat row or .timeline; keep colours in the deep-blue/gold brand family, use generous spacing and large rounded corners. Animations are CSS-only and automatically disabled for visitors who prefer reduced motion, so use them freely but keep the layout readable if they are off.
+
+        DESIGN RULES — Apple-like aesthetics plus symmetry, and show before you tell:
+        - GRAPHICS OVER PROSE: if a fact can be shown as a diagram, icon, number, chip, progress bar or map, show it and cut the sentence that would have described it. A visitor should grasp the answer by looking, not by reading. Text is only for what a graphic cannot carry (a phone number, a name, a legal condition).
+        - PREFER THE RENDERED GRAPHICS over HTML text whenever the content is a flow, hierarchy, composition, comparison or timeline: mermaid flowchart / sequenceDiagram / mindmap / pie, or a .chart bar block. Use the html fence for the surrounding premium layout (hero, cards, stats), not to re-type what a diagram already says.
+        - SYMMETRY: build on a symmetric grid — use the .grid-2 / .grid-3 / .grid-4 helpers (equal columns) so cards line up in balanced rows; two or four items side by side, never an odd ragged row. Keep equal heights and equal gaps, centre the hero title, and make the left and right margins match. Align numbers on a shared baseline.
+        - APPLE-LIKE DETAIL: generous white space (at least 16-20px between blocks), one accent colour plus neutrals, large corner radii (14-20px), soft wide shadows instead of hard borders, font weights 600 for titles and 400 for body, letter-spacing slightly tightened on large headings, and no more than 3 text sizes on one screen. Round icons/emoji in a coloured circle rather than a bullet.
+        - Keep total text short: at most ~2 short sentences per card, and prefer a label + figure over a paragraph.
         Every node, step, number and image path must come from the knowledge base — never invent steps, quantities or paths to fill a shape. Put the visual right after one sentence of plain-language answer and keep the surrounding text short.
       - You are a conversation agent. You cannot browse, run code, or access any system beyond the knowledge base.
 

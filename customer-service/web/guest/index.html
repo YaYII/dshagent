@@ -467,7 +467,7 @@
 
   // ── 版本标识：每次发布递增，方便定位访客用的是哪个版本 ──────────────
   // 前端（此页面）版本号：改页面后 +1；服务端版本由 guest-server 注入。
-  const APP_VERSION = 'v2.8.1'
+  const APP_VERSION = 'v2.9.0'
   const svcAgentEl = document.getElementById('svcAgent')
   const svcVerEl = document.getElementById('svcVer')
   if (svcVerEl) svcVerEl.textContent = `前端 ${APP_VERSION} · 服务 --`
@@ -772,6 +772,34 @@
     .glow-text { text-shadow: 0 0 18px rgba(56, 189, 248, .55); }
     .divider { height: 1px; border: 0; margin: 14px 0;
       background: linear-gradient(90deg, transparent, #cbd5e1 20%, #cbd5e1 80%, transparent); }
+
+    /* 6) 对称栅格与苹果风细节：等宽列、等高卡片、统一间距（模型按契约直接套用） */
+    .grid-2, .grid-3, .grid-4 { display: grid; gap: 16px; grid-auto-rows: 1fr; align-items: stretch; }
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .grid-2 > *, .grid-3 > *, .grid-4 > * { height: 100%; margin: 0; }
+    .stack { display: flex; flex-direction: column; gap: 16px; }
+    .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .center { text-align: center; }
+    .icon-circle {
+      width: 40px; height: 40px; flex: 0 0 auto; border-radius: 50%; display: inline-flex;
+      align-items: center; justify-content: center; font-size: 19px; line-height: 1;
+      background: radial-gradient(circle at 30% 25%, #ffffff, #eff6ff 60%, #dbeafe);
+      border: 1px solid #dbeafe; box-shadow: 0 2px 6px -2px rgba(37, 99, 235, .35);
+    }
+    .icon-circle.gold { background: radial-gradient(circle at 30% 25%, #ffffff, #fffbeb 60%, #fef3c7); border-color: #fde68a; }
+    .metric-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 8px 0; border-bottom: 1px solid #f1f5f9; }
+    .metric-row:last-child { border-bottom: 0; }
+    .bar-track { height: 8px; border-radius: 999px; background: #f1f5f9; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, #60a5fa, #2563eb); }
+    .kbd { padding: 1px 6px; border-radius: 6px; background: #f3f4f6; border: 1px solid #e5e7eb; font-size: 12px; }
+    /* 苹果风排版：更紧的标题字距、克制的字级（大标题 600、正文 400） */
+    h1 { letter-spacing: -.02em; } h2 { letter-spacing: -.01em; }
+    /* 窄屏时栅格退化为单列，保持对称（不再出现半宽空位） */
+    @media (max-width: 640px) {
+      .grid-2, .grid-3, .grid-4 { grid-template-columns: minmax(0, 1fr); }
+    }
 
     /* 无障碍：用户偏好减少动效时全部静止 */
     @media (prefers-reduced-motion: reduce) {

@@ -110,7 +110,7 @@
         preset: customer-service-guest
         workspace: /kb
         # 部署构建戳：guest-server/服务有变更时递增，报障"工号+版本"即可定位是哪个构建在答。
-        serviceVersion: '2026-09-10.6'
+        serviceVersion: '2026-09-10.7'
         # Customer-service Q&A is retrieval-grounded: pin a low reasoning
         # effort so one uncertain turn cannot burn ~15-20s on a long internal
         # reasoning chain before the first answer token reaches the visitor.
