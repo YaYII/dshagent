@@ -467,7 +467,7 @@
 
   // ── 版本标识：每次发布递增，方便定位访客用的是哪个版本 ──────────────
   // 前端（此页面）版本号：改页面后 +1；服务端版本由 guest-server 注入。
-  const APP_VERSION = 'v2.9.0'
+  const APP_VERSION = 'v2.9.1'
   const svcAgentEl = document.getElementById('svcAgent')
   const svcVerEl = document.getElementById('svcVer')
   if (svcVerEl) svcVerEl.textContent = `前端 ${APP_VERSION} · 服务 --`
@@ -1537,7 +1537,8 @@
         res = await fetch(`${API_BASE}/api/guest/chat/stream`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ sessionId: id, message: text }),
+          // 带上访客当前选择的界面语言：回答必须跟随它（KB 是繁体，不能照抄 KB 用字）
+          body: JSON.stringify({ sessionId: id, message: text, lang }),
           signal: controller.signal,
         })
       } finally {

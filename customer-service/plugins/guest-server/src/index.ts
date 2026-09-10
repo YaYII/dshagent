@@ -297,6 +297,30 @@ export function apply(ctx: Context, config: Config): void {
     historyCache.delete(sessionId)
   }
 
+  /**
+   * 访客界面语言 → 回答语言指令。知识库（Obsidian vault）以繁体中文记录，
+   * 模型会顺手沿用 KB 的用字；因此每次对话都显式告知当前界面语言，要求回答
+   * 与该语言一致（简体中文界面必须输出简体，不能照抄资料库的繁体）。
+   */
+  const LANG_LABEL: Record<string, string> = {
+    zh: 'Simplified Chinese (简体中文)',
+    zhHant: 'Traditional Chinese (繁體中文)',
+    en: 'English',
+    pt: 'Portuguese (Português)',
+  }
+
+  /** 组装某次对话的语言上下文文本；未知/缺失语言返回 null（不加提示）。 */
+  const languageContext = (lang: unknown): string | null => {
+    if (typeof lang !== 'string') return null
+    const label = LANG_LABEL[lang]
+    if (label === undefined) return null
+    return `The visitor's interface language is ${label}. Write your entire reply in that language — `
+      + 'including every heading, card label, number unit and diagram node. The knowledge base is written in Traditional Chinese: '
+      + "never copy its wording verbatim into another language or script; translate the facts into the visitor's language " 
+      + '(e.g. an interface set to Simplified Chinese must be answered in Simplified Chinese, not Traditional). '
+      + 'Keep proper nouns (company name, place names, hotline numbers) as they are, and keep the source-file citations unchanged.'
+  }
+
   /** Drop a guest session (agent + map entry). */
   const dropGuest = async (sessionId: string): Promise<void> => {
     const guest = guests.get(sessionId)
@@ -394,7 +418,7 @@ export function apply(ctx: Context, config: Config): void {
   }
 
   /** Run one chat turn and return the assistant reply plus cited sources. */
-  const runChat = async (sessionId: string, text: string): Promise<{ reply: string; sources: string[] }> => {
+  const runChat = async (sessionId: string, text: string, lang: unknown): Promise<{ reply: string; sources: string[] }> => {
     beginTurn(sessionId)
     try {
       await ensureGuest(sessionId)
@@ -407,6 +431,14 @@ export function apply(ctx: Context, config: Config): void {
         source: { kind: 'user' },
       })
       agent.followup(message)
+      // 语言上下文按运行时注入（kind: 'plugin' 会被历史读取过滤，不污染对话）
+      const langNote = languageContext(lang)
+      if (langNote !== null) {
+        agent.followup(createUserMessage({
+          content: [{ type: 'text', text: langNote }],
+          source: { kind: 'plugin', plugin: 'guest-server' },
+        }))
+      }
       await agent.whenIdle()
       const reply = await readLatestAssistantText(sessionId as never)
       return { reply, sources: extractSources(reply) }
@@ -429,6 +461,7 @@ export function apply(ctx: Context, config: Config): void {
   const runChatStream = async (
     sessionId: string,
     text: string,
+    lang: unknown,
     onDelta: (delta: string) => void,
   ): Promise<{ reply: string; sources: string[] }> => {
     await ensureGuest(sessionId)
@@ -446,6 +479,14 @@ export function apply(ctx: Context, config: Config): void {
         source: { kind: 'user' },
       })
       agent.followup(message)
+      // 语言上下文按运行时注入（kind: 'plugin' 会被历史读取过滤，不污染对话）
+      const langNote = languageContext(lang)
+      if (langNote !== null) {
+        agent.followup(createUserMessage({
+          content: [{ type: 'text', text: langNote }],
+          source: { kind: 'plugin', plugin: 'guest-server' },
+        }))
+      }
       await agent.whenIdle()
       const reply = await readLatestAssistantText(sessionId as never)
       return { reply, sources: extractSources(reply) }
@@ -600,7 +641,7 @@ export function apply(ctx: Context, config: Config): void {
             sendJson(res, 400, { error: 'invalid JSON body' })
             return
           }
-          const { sessionId, message } = (parsed ?? {}) as { sessionId?: string; message?: string }
+          const { sessionId, message, lang } = (parsed ?? {}) as { sessionId?: string; message?: string; lang?: string }
           if (typeof sessionId !== 'string' || typeof message !== 'string' || message.trim() === '') {
             sendJson(res, 400, { error: 'sessionId and message (non-empty string) are required' })
             return
@@ -611,7 +652,7 @@ export function apply(ctx: Context, config: Config): void {
             return
           }
           try {
-            const result = await runChat(sessionId, message)
+            const result = await runChat(sessionId, message, lang)
             if (admission !== null && admission.kind === 'warn') {
               sendJson(res, 200, { ...result, notice: admission.notice })
             } else {
@@ -634,7 +675,7 @@ export function apply(ctx: Context, config: Config): void {
             sendJson(res, 400, { error: 'invalid JSON body' })
             return
           }
-          const { sessionId, message } = (parsed ?? {}) as { sessionId?: string; message?: string }
+          const { sessionId, message, lang } = (parsed ?? {}) as { sessionId?: string; message?: string; lang?: string }
           if (typeof sessionId !== 'string' || typeof message !== 'string' || message.trim() === '') {
             sendJson(res, 400, { error: 'sessionId and message (non-empty string) are required' })
             return
@@ -657,7 +698,7 @@ export function apply(ctx: Context, config: Config): void {
           sendEvent('meta', { sessionId, version: serviceVersion })
           if (warnNotice !== null) sendEvent('notice', { text: warnNotice })
           try {
-            const result = await runChatStream(sessionId, message, (delta) => {
+            const result = await runChatStream(sessionId, message, lang, (delta) => {
               sendEvent('delta', { text: delta })
             })
             sendEvent('done', { reply: result.reply, sources: result.sources })
