@@ -52,6 +52,18 @@
         compat:
           supportsDeveloperRole: false
         models:
+          # 客服默认模型：V4.1 Flash。旧的 V4 Flash 条目保留，改 agent-default-model
+          # 的 model 一行即可回滚（中转同时提供两者，实测均可用）。
+          - id: deepseek/deepseek-v4.1-flash
+            name: DeepSeek V4.1 Flash
+            contextWindow: 1000000
+            maxTokens: 384000
+            reasoningEfforts:
+              off: null
+              low: low
+              medium: medium
+              high: high
+              max: max
           - id: deepseek/deepseek-v4-flash
             name: DeepSeek V4 Flash
             contextWindow: 1000000
@@ -86,7 +98,7 @@
 - id: agent-default-model
   config:
     provider: commandcode
-    model: deepseek/deepseek-v4-flash
+    model: deepseek/deepseek-v4.1-flash
 
 # ── Guest 游客 HTTP 桥（host 层）───────────────────────────────────────────
 # 匿名访客对话 JSON API（/api/guest/*），驱动 customer-service-guest preset
@@ -98,7 +110,7 @@
         preset: customer-service-guest
         workspace: /kb
         # 部署构建戳：guest-server/服务有变更时递增，报障"工号+版本"即可定位是哪个构建在答。
-        serviceVersion: '2026-09-10.4'
+        serviceVersion: '2026-09-10.5'
         # Customer-service Q&A is retrieval-grounded: pin a low reasoning
         # effort so one uncertain turn cannot burn ~15-20s on a long internal
         # reasoning chain before the first answer token reaches the visitor.
