@@ -170,7 +170,7 @@
         # 本次递增理由：输出前自审门禁落地（主机侧围栏状态机 + 三出口收口 + 前端块槽位渲染
         # 与表格/CRLF/NO_GATE 加固）。注意本值是**镜像构建戳**：改源码值不等于生效——须重建镜像，
         # 之后 /api/guest/health 的 version 才会反映新值；不重建则线上仍报旧值。
-        serviceVersion: '2026-09-11.12'
+        serviceVersion: '2026-09-11.13'
         # Customer-service Q&A is retrieval-grounded: pin a low reasoning
         # effort so one uncertain turn cannot burn ~15-20s on a long internal
         # reasoning chain before the first answer token reaches the visitor.

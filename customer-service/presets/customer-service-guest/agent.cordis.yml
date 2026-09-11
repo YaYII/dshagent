@@ -74,16 +74,16 @@
         - APPLE-LIKE DETAIL: generous white space (at least 16-20px between blocks), one accent colour plus neutrals, large corner radii (14-20px), soft wide shadows instead of hard borders, font weights 600 for titles and 400 for body, letter-spacing slightly tightened on large headings, and no more than 3 text sizes on one screen. Round icons/emoji in a coloured circle rather than a bullet.
         - Keep total text short: at most ~2 short sentences per card, and prefer a label + figure over a paragraph.
         Every node, step, number and image path must come from the knowledge base — never invent steps, quantities or paths to fill a shape. Put the visual right after one sentence of plain-language answer and keep the surrounding text short.
-      - LIVE CUSTOMER DATA (公司業務系統): when the visitor asks about **their own** contract or bill — 合約資料 / 賬單 / 電費金額 / 用電量 / 繳費狀態 / 到期日 / 抄錶日期 — do NOT answer from the knowledge base and do NOT say it is out of scope. Use `api_get` against the company e-service API (測試環境):
-        * 查詢該訪客的合約清單: `https://te-service-api2.cem-macau.com/api/contract/all/ai/zh` （語言段用訪客界面語言：zh | en | pt；例如葡文界面用 /pt）。回傳 data.caInfo[]，每項含 ca_no(合約號)、name(名稱)、tariff_class(收費組別)、bill_month、issue_date、due_date、next_read_date、units(用電量)、amount(應繳金額)、paid(繳費狀態)。
-        * 查詢某合約的賬單: `https://te-service-api2.cem-macau.com/api/bill/{合約號}/ai/zh`（可選 query: `?level=1|2|3|5`）。回傳 data.billInfo[]，每項含 billingMonth、issueDate、dueDate、dueAmount、consumption(用電量)、paymentStatus、balance 等。
-        * 查詢參數只能用上面列出的形式。`withAddress` 雖然寫在規範裡，但實測接口目前對任何值都回 HTTP 422 參數錯誤，**不要使用**；`level=3` 實測會超時，**不要使用**。帶 `level=5` 時會多回 addressInst / streetName 等地址欄位。
-        * 回應統一信封：`{ isSuccess, data, errorCode, message }`。errorCode 語義（AlphaSolution 規範）：`9999` 系統錯誤、`9998` 參數錯誤、`9997` CEM API 錯誤。`isSuccess` 為 false 或 HTTP 4xx/5xx 時，**不要編造資料**，用一句禮貌話說明暫時查不到並建議致電客服熱線；若是 `9998`（參數錯誤）通常代表合約號格式不對，可請訪客核對後再試。
-        * 合約號不存在時接口會回 HTTP 500（並輸出一個很大的 HTML 錯誤頁，不是 JSON）。工具會直接報錯且看不到任何資料，這與「查不到」同義：照上一條的禮貌話回覆，不要重試同一號碼，也不要猜測金額。
-        * 只有訪客主動提供或詢問合約相關資料時才調用；每次回答只調用必要的 1-2 次。金額、日期、用電量一律照抄 API 回傳值，不得換算或推測。
-        * 這類問題**不需要查知識庫、也不要用 kb_append 記錄**：它是可即時查得的業務數據，不屬於「知識庫答不到的問題」。查到後用簡短文字或表格直接回答（金額與日期務必完整），不要為了配圖而產生空的圖表塊。
-        * 合約清單一次回傳 `data.no_ca` 個合約（實測 151 筆，遠超一屏）。**不要一次列出全部**：先講總數與其中要繳費的幾筆（例如狀態為「未繳費」者），其餘請訪客提供合約號再逐筆細查，避免把上百行貼給訪客。
-      - You are a conversation agent. You cannot browse, run code, or access any system beyond the knowledge base.
+      - LIVE CUSTOMER DATA (公司業務系統): when the visitor asks about a contract or bill — 合約資料 / 賬單 / 電費金額 / 用電量 / 繳費狀態 / 到期日 / 抄錶日期 — do NOT answer from the knowledge base and do NOT say it is out of scope. Use the `lookup_*` tools (測試環境):
+        * **第一步永遠是問合約號**：你沒有、也不可以取得訪客名下的合約清單。就像 10086 不會把你的電話號碼念給你聽，而是請你報號、它來核對。所以訪客問「我有哪些合約」「我的賬單幾多錢」時，先禮貌請他提供 10 位合約號（見卡片或賬單上的號碼），**不要猜、不要列舉、不要說『您名下共有 N 張合約』**。
+        * 拿到合約號後：`lookup_contract`(contract_no, lang) 核對該號碼是否屬於本賬戶並取回該合約的收費組別、賬單月份、到期日、用電量、應繳金額、繳費狀態；`lookup_bill`(contract_no, lang) 取回該合約的賬單明細（賬單月份、發出日期、到期日、應繳金額、用電量、繳費狀態、結餘等）。lang 用訪客界面語言（zh | en | pt）。
+        * 兩個工具的回傳只有兩件事：`found`（該號碼是否存在於本賬戶）與**這一個號碼自己的記錄**。它們在設計上就無法列出其他合約，所以你也不可能知道訪客有多少張合約——**絕對不要編造或推測數量**。
+        * `found: false` 表示系統查不到這個號碼：請訪客核對號碼是否打錯（10 位數字），或核對是否為本人合約；不要重複重試同一號碼，也不要猜測金額。
+        * 金額、日期、用電量一律照抄工具回傳值，不得換算或推測。查到後用簡短文字或表格直接回答（金額與日期務必完整），不要為了配圖而產生空的圖表塊。
+        * 這類問題**不需要查知識庫、也不要用 kb_append 記錄**：它是可即時查得的業務數據，不屬於「知識庫答不到的問題」。
+        * 只有訪客主動提供合約號時才調用；每次回答只調用必要的 1-2 次。
+      - 若訪客問的是一般性問題（例如「點樣交電費」「停電點算」），照常查知識庫回答，不涉及合約號。
+      - You are a conversation agent. You cannot browse the open web, run code or shell commands, or read files. Beyond the knowledge base your only data source is the `lookup_*` tools above, which confirm a contract number the visitor gave you and return that one record.
 
 - id: agent-instructions
   name: '@deepseek-ai/dsh-agent-instructions'
@@ -98,9 +98,10 @@
     maxResults: 8
 
 # ── read-only external data ─────────────────────────────────────────────────
-# Guests may query allowed external JSON APIs (api_get) for data behind the
-# assistant's answers, but NEVER write (enableWrite stays false: no kb_write
-# tool is registered for this preset).
+# Guests may query allowed external JSON APIs for data behind the assistant's
+# answers, but NEVER write (enableWrite stays false: no kb_write tool is
+# registered for this preset). The contract/bill lookups are confirmation-only
+# (apiLookup below); api_get itself cannot reach the customer list endpoint.
 - id: api-client
   name: '/app/customer-service/plugins/api-client/src/index.ts'
   config:
@@ -111,12 +112,68 @@
     # CEM 官方 AI Chatbot API（路径与字段以《CEM AI API 规范》为准，见
     # /home/as-workstation01/Downloads/临时文件资料/客服agent/cem_ai_api.txt）。
     # 规范路由：/api/contract/all/ai/{lang} 与 /api/bill/{contract_no}/ai/{lang}，
-    # lang ∈ zh|en|pt。接口计划于下周一开通，此前调用会失败（属预期）。
+    # lang ∈ zh|en|pt。
     apiAllowlist:
       - https://te-service-api2.cem-macau.com/
+    # ── 只放行账单端点；**合约清单端点故意不在这里** ──────────────────────
+    # /api/contract/all/ 会一次返回账户全部合约（实测 151 笔，含姓名、地址、
+    # 缴费状态）。它是「核对客人报出的合约号」用的，不是「告诉客人他有哪些
+    # 合约」用的——10086 不会把号码念给你听，而是让你报号、它来确认。
+    # 放行它等于给模型一个枚举能力：一次调用即可dump整份客户清单。
+    # api_get 因此拿不到合约清单；核对走下面 apiLookup 的 lookup_contract。
     apiPathAllowlist:
-      - /api/contract/all/ai/
       - /api/bill/
+    # ── 核对式查询（唯一能碰 /api/contract/all/ 的通道）──────────────────
+    # 返回体只保留 found + 该合约号自己的记录，其它合约（及其数量）都不会
+    # 进入模型上下文。字段白名单是「只给这些」而非「除了这些」：上游将来加
+    # 了身份证号、银行账号之类的字段，也不会自动漏给访客。
+    # 环境是演示环境，字段已按展示需要放宽；若要收紧，删掉对应字段即可。
+    apiLookupFields:
+      contract:
+        - ca_no
+        - tariff_class
+        - bill_month
+        - issue_date
+        - due_date
+        - next_read_date
+        - units
+        - amount
+        - paid
+      bill:
+        - contractAccountNo
+        - billingMonth
+        - issueDate
+        - dueDate
+        - avoidDisconnectionDate
+        - consumption
+        - dueAmount
+        - oddAmount
+        - balance
+        - paymentStatus
+        - meterReadingType
+        - gsRemains
+        - billType
+    apiLookup:
+      - name: contract
+        description: 核对访客报出的合约号是否属于本账户，并取回该合约的当期资料。
+        pathTemplate: /api/contract/all/ai/{lang}
+        keyedBy: contract_no
+        # 只接受 10 位数字，且必须由访客提供——校验在发出请求之前完成。
+        valuePattern: '[0-9]{10}'
+        valueHint: 10 位数字的合约号
+        listPath: data.caInfo
+        matchField: ca_no
+        fixedQuery: {}
+      - name: bill
+        description: 取回访客报出的合约号对应的账单资料。
+        pathTemplate: /api/bill/{contract_no}/ai/{lang}
+        keyedBy: contract_no
+        valuePattern: '[0-9]{10}'
+        valueHint: 10 位数字的合约号
+        listPath: data.billInfo
+        matchField: contractAccountNo
+        fixedQuery:
+          level: '1'
     # 规范未要求鉴权头，先留空；若开通后发现网关要求约定头，在此填入头名与取值，
     # 密钥请走环境变量占位（如 '${CEM_API_KEY}'），不要写入本文件。
     apiHeaders: {}
