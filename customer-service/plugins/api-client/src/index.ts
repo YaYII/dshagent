@@ -54,6 +54,20 @@ export interface Config {
    * "unanswered questions" collection). Empty disables kb_append.
    */
   appendPaths: string[]
+  /**
+   * Extra request headers api_get sends on every call (e.g. a vendor gateway
+   * that requires a named header). Values may use `${ENV_NAME}` to inject a
+   * secret from the container environment, so no credential is written into
+   * the composition file or the repository.
+   */
+  apiHeaders: Record<string, string>
+  /**
+   * URL **path** prefixes (after the allowlisted host) api_get may reach, e.g.
+   * `/api/contract/all/`. Empty means "any path on an allowlisted host".
+   * Narrowing to the documented endpoints keeps a prompt-injected agent from
+   * probing unrelated routes on a partner host.
+   */
+  apiPathAllowlist: string[]
   /** Max response bytes api_get accepts. */
   maxResponseBytes: number
   /** Request timeout ms. */
@@ -69,6 +83,8 @@ export const Config: z<Config> = z.object({
   enableWrite: z.boolean().default(false),
   appendDir: z.string().default('/dsh-home/unanswered'),
   appendPaths: z.array(z.string()).default([]),
+  apiHeaders: z.dict(z.string()).default({}),
+  apiPathAllowlist: z.array(z.string()).default([]),
   maxResponseBytes: z.number().default(256 * 1024),
   timeoutMs: z.number().default(30_000),
   allowOverwrite: z.boolean().default(false),
@@ -91,16 +107,39 @@ function resolveNotePath(root: string, rel: string): string {
   return abs
 }
 
+/**
+ * Resolve configured header values, expanding `${ENV_NAME}` from the process
+ * environment. Keeping the secret in the environment (docker-compose `env_file`)
+ * means the composition file and this repository carry no credential.
+ * @param config - validated plugin configuration.
+ * @returns Headers to merge into every api_get request.
+ */
+function resolveHeaders(config: Config): Record<string, string> {
+  const out: Record<string, string> = { accept: 'application/json' }
+  for (const [name, raw] of Object.entries(config.apiHeaders)) {
+    const value = String(raw).replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_m, key: string) => process.env[key] ?? '')
+    if (value !== '') out[name] = value
+  }
+  return out
+}
+
 /** Perform a bounded HTTP GET and return parsed JSON. */
 async function httpGetJson(url: string, config: Config, signal?: AbortSignal): Promise<Json> {
   const allowed = config.apiAllowlist.some(prefix => url.startsWith(prefix))
   if (!allowed) throw new Error(`destination not allowed: ${url}`)
+  // 路径白名单：只放行部署文档里列出的端点，避免被提示注入后去探伙伴主机的其他路由
+  if (config.apiPathAllowlist.length > 0) {
+    const path = new URL(url).pathname
+    if (!config.apiPathAllowlist.some(prefix => path.startsWith(prefix))) {
+      throw new Error(`api_get path not allowed: ${path}`)
+    }
+  }
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), config.timeoutMs)
   const onOuterAbort = (): void => controller.abort()
   signal?.addEventListener('abort', onOuterAbort, { once: true })
   try {
-    const res = await fetch(url, { signal: controller.signal, headers: { accept: 'application/json' } })
+    const res = await fetch(url, { signal: controller.signal, headers: resolveHeaders(config) })
     if (!res.ok) throw new Error(`api_get failed: HTTP ${res.status}`)
     const text = await res.text()
     if (text.length > config.maxResponseBytes) throw new Error('api_get response too large')

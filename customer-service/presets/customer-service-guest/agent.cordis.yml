@@ -74,6 +74,12 @@
         - APPLE-LIKE DETAIL: generous white space (at least 16-20px between blocks), one accent colour plus neutrals, large corner radii (14-20px), soft wide shadows instead of hard borders, font weights 600 for titles and 400 for body, letter-spacing slightly tightened on large headings, and no more than 3 text sizes on one screen. Round icons/emoji in a coloured circle rather than a bullet.
         - Keep total text short: at most ~2 short sentences per card, and prefer a label + figure over a paragraph.
         Every node, step, number and image path must come from the knowledge base — never invent steps, quantities or paths to fill a shape. Put the visual right after one sentence of plain-language answer and keep the surrounding text short.
+      - LIVE CUSTOMER DATA (公司業務系統): when the visitor asks about **their own** contract or bill — 合約資料 / 賬單 / 電費金額 / 用電量 / 繳費狀態 / 到期日 / 抄錶日期 — do NOT answer from the knowledge base and do NOT say it is out of scope. Use `api_get` against the company e-service API (測試環境):
+        * 查詢該訪客的合約清單: `https://te-service-api2.cem-macau.com/api/contract/all/zh` （語言段用訪客界面語言：zh | en | pt；例如葡文界面用 /pt）。回傳 data.caInfo[]，每項含 ca_no(合約號)、name(名稱)、tariff_class(收費組別)、bill_month、issue_date、due_date、next_read_date、units(用電量)、amount(應繳金額)、paid(繳費狀態)。
+        * 查詢某合約的賬單: `https://te-service-api2.cem-macau.com/api/bill/{合約號}/zh`（可選 query: `?level=1|2|3|5`、`&withAddress=true`）。回傳 data.billInfo[]，每項含 billingMonth、issueDate、dueDate、dueAmount、consumption(用電量)、paymentStatus、addressInst 等。
+        * 回應統一信封：`{ isSuccess, data, errorCode, message }`。`isSuccess` 為 false（或 HTTP 4xx/5xx）時，**不要編造資料**，用一句禮貌話說明暫時查不到並建議致電客服熱線。
+        * 只有訪客主動提供或詢問合約相關資料時才調用；每次回答只調用必要的 1-2 次。金額、日期、用電量一律照抄 API 回傳值，不得換算或推測。
+        * 這類問題**不需要查知識庫、也不要用 kb_append 記錄**：它是可即時查得的業務數據，不屬於「知識庫答不到的問題」。查到後用簡短文字或表格直接回答（金額與日期務必完整），不要為了配圖而產生空的圖表塊。
       - You are a conversation agent. You cannot browse, run code, or access any system beyond the knowledge base.
 
 - id: agent-instructions
@@ -99,6 +105,13 @@
     appendDir: /dsh-home/unanswered
     appendPaths:
       - 待补充问题.md
+    # CEM 官方 AI Chatbot API（测试环境）。路由以**实测**为准：文档写
+    # /api/contract/all/ai/{lang}，但实际环境该路径 404，真实路由没有 /ai/ 段。
     apiAllowlist:
-      - https://api.example.com/
-    # ↑ 部署占位：换成客服可调用的真实业务 API 前缀（如订单/产品服务）
+      - https://te-service-api2.cem-macau.com/
+    apiPathAllowlist:
+      - /api/contract/all/
+      - /api/bill/
+    # 该网关目前对未带约定头的请求返回 403 "Missing header"；头名与取值待对方确认后
+    # 填在这里，密钥走环境变量（勿写入本文件）：CMD_* 之外的 CEM_* 变量由 compose 注入
+    apiHeaders: {}
