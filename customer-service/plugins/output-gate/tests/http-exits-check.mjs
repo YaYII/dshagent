@@ -87,8 +87,15 @@ async function boot(reply, frames) {
     { type: 'user/message', data: { content: [{ type: 'text', text: '你好' }], source: { kind: 'user' } } },
     { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: reply }] } } },
   ]
+  // 桩必须实现 guest-server 用到的每一个 Agent 消息入口。真实 Agent 的接口是
+  // send/followup/steer/inject（packages/core/agent/src/runtime-types.ts）；这里原先
+  // 只有 followup，guest-server 把语言说明改成 inject 后桩就抛 TypeError → /chat 500，
+  // 让「行为其实是对的」看起来像回归。桩缺方法 = 测试替身落伍于被测接口。
   const agent = {
+    send() {},
     followup() {},
+    steer() {},
+    inject() {},
     async whenIdle() {
       for (const piece of frames ?? [reply]) {
         ctx.emit('session/event', { id: SESSION_ID }, { type: 'assistant/chunk', data: { chunk: { type: 'text-delta', text: piece } } })

@@ -489,19 +489,22 @@ export function apply(ctx: Context, config: Config): void {
       if (guest === undefined) throw new Error('unknown session')
       const agent = ctx.agents.get(sessionId as never)
       if (agent === undefined) throw new Error('session agent is not live')
+      // 语言上下文按运行时注入（kind: 'plugin' 会被历史读取过滤，不污染对话）。
+      // 必须用 inject（排入 next-step、不唤醒）而不是 followup：followup 每次都
+      // 唤醒一个新 turn，会让「用户消息」和「语言说明」各生成一条回答——实测同一轮
+      // 落盘两条 assistant 消息（中文一条、英文一条），刷新后历史里并排出现两条回答。
+      const langNote = languageContext(lang)
+      if (langNote !== null) {
+        agent.inject(createUserMessage({
+          content: [{ type: 'text', text: langNote }],
+          source: { kind: 'plugin', plugin: 'guest-server' },
+        }))
+      }
       const message = createUserMessage({
         content: [{ type: 'text', text }],
         source: { kind: 'user' },
       })
       agent.followup(message)
-      // 语言上下文按运行时注入（kind: 'plugin' 会被历史读取过滤，不污染对话）
-      const langNote = languageContext(lang)
-      if (langNote !== null) {
-        agent.followup(createUserMessage({
-          content: [{ type: 'text', text: langNote }],
-          source: { kind: 'plugin', plugin: 'guest-server' },
-        }))
-      }
       await agent.whenIdle()
       const reply = await readLatestAssistantText(sessionId as never)
       return { reply, sources: extractSources(reply) }
@@ -594,19 +597,21 @@ export function apply(ctx: Context, config: Config): void {
     })
     beginTurn(sessionId)
     try {
+      // 语言上下文按运行时注入（kind: 'plugin' 会被历史读取过滤，不污染对话）。
+      // 用 inject 而非 followup：见 runChat 里的同款注释——followup 会另起一个 turn，
+      // 让同一轮产生两条回答。
+      const langNote = languageContext(lang)
+      if (langNote !== null) {
+        agent.inject(createUserMessage({
+          content: [{ type: 'text', text: langNote }],
+          source: { kind: 'plugin', plugin: 'guest-server' },
+        }))
+      }
       const message = createUserMessage({
         content: [{ type: 'text', text }],
         source: { kind: 'user' },
       })
       agent.followup(message)
-      // 语言上下文按运行时注入（kind: 'plugin' 会被历史读取过滤，不污染对话）
-      const langNote = languageContext(lang)
-      if (langNote !== null) {
-        agent.followup(createUserMessage({
-          content: [{ type: 'text', text: langNote }],
-          source: { kind: 'plugin', plugin: 'guest-server' },
-        }))
-      }
       await agent.whenIdle()
       const reply = await readLatestAssistantText(sessionId as never)
       if (turn === undefined) {
