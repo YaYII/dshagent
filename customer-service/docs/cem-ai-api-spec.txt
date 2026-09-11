@@ -1,0 +1,121 @@
+# API Response
+
+相關 API 調用後都以 JSON 格式返回，返回格式如下：
+{ "isSuccess": true or false, "data": API 返回的資料, "errorCode": 錯誤代碼, "message": 若調用失敗，相關的錯誤信息 }
+
+
+# ErrorCode List
+
+## AlphaSolution 的 Error Code
+
+- 9999: 系統錯誤
+- 9998: 參數錯誤
+- 9997: CEM API 錯誤
+
+# API End Point
+
+- 投產系統:
+- 測試系統: https://te-service-api2.cem-macau.com/
+
+# AI Chatbot 使用的 API
+
+## 查詢所有合約
+
+1. 查詢所有合約 Get All Contracts
+
+    - URL: /api/contract/all/ai/{lang}
+    - URL parameters:
+        - lang: zh|en|pt
+    - Method: Get
+    - Response:
+      ```
+      {
+        "isSuccess": "true",
+        "data": {
+            "no_ca": "1",
+            "caInfo": [
+                {
+                    "key": "450",
+                    "ca_no": "0001148907",
+                    "name": "陸 俱樂 ",
+                    "tariff_class": "B3",
+                    "nickname": "MultiDrive Testing",
+                    "bill_month": "2021/08",
+                    "print_doc": "001305761581",
+                    "issue_date": "2021-09-01",
+                    "due_date": "2021-09-16",
+                    "next_read_date": "2021-09-30",
+                    "units": "55515",
+                    "amount": "71210",
+                    "paid": "未繳 ",
+                    "paid_code": "31",
+                    "ca_group": "住宅",
+                    "ca_group_code": "11",
+                    "ca_lang": "葡文",
+                    "ca_lang_code": "203",
+                    "ca_residential": "否",
+                    "ca_residential_code": "0",
+                    "ca_restrict": "否",
+                    "ca_restrict_code": "0",
+                    "ca_enable": "合約持有人",
+                    "ca_enable_code": "100",
+                    "ca_terminated": "0",
+                    "ca_ebill": "否",
+                    "ca_ebill_code": "0",
+                    "ca_notification": "否",
+                    "ca_notification_code": "0",
+                    "ca_eis": "1"
+                }
+            ]
+        }
+      }
+      ```
+
+## 查詢賬單
+
+2. 查詢賬單資料 Get Bill Information
+
+    - URL: /api/bill/{contract_no}/ai/{lang}
+    - URL parameters:
+        - contract_no: 合約號碼
+        - lang: zh|en|pt
+    - Query parameters:
+        - level: 可選，1|2|3|5，預設為 1
+        - withAddress: 可選，true|false，預設為 false
+    - Method: Get
+    - Response:
+      ```
+      {
+        "isSuccess": "true",
+        "data": {
+            "billInfo": [
+                {
+                    "contractAccountNo": "000402970870",
+                    "billingMonth": "202101",
+                    "issueDate": "2021-02-04",
+                    "dueDate": "2021-02-24",
+                    "dueAmount": "110.00",
+                    "consumption": "233.0",
+                    "paymentStatus": "P",
+                    "printDoc": "001405209003",
+                    "balance": "0.00",
+                    "oddAmount": "-5.42",
+                    "avoidDisconnectionDate": "2021-03-04",
+                    "nextMonthBegin": "2021-01-08",
+                    "nextMonthEnd": "2021-02-04",
+                    "meterReadingType": "A",
+                    "finalBill": "",
+                    "bimsgCode": "",
+                    "autopayDate": "0000-00-00",
+                    "gsUsed": "-200.00",
+                    "gsRemains": "1953.12",
+                    "discVar": "",
+                    "barcode": "920402970870210929000000100008",
+                    "addressInst": "PAT DA PALHA 4,EDF.YU VAN 1 AND. B, MACAU",
+                    "addressInstEng": "PAT DA PALHA 4,EDF.YU VAN 1 AND. B, MACAU",
+                    "billType": "N"
+                }
+            ]
+        }
+      }
+      ```
