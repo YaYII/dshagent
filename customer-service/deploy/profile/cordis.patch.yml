@@ -116,6 +116,22 @@
     provider: commandcode
     model: deepseek/deepseek-v4.1-flash
 
+# ── 会话标题的辅助模型上限 ─────────────────────────────────────────────────
+# 官方默认 maxOutputTokens=64 是从「不思考的模型」推出来的。commandcode 网关对
+# deepseek-v4.1-flash 强制开启思考（实测传 reasoning_effort:"off" 直接 400：
+# Invalid option: expected one of "low"|"medium"|"high"|"xhigh"|"max"），64 个
+# token 会被推理段全部吃光：finish_reason="length"、content=""，官方 provider 抛
+# 「title output reached maxOutputTokens」，每个访客会话都在容器日志里留一条告警，
+# 标题退化成截断首句。实测 512 才够（reasoning_tokens≈200 + 标题）。标题是访客
+# 在「历史会话」列表里看到的门面，不能长期退化，故在此显式提高上限。
+- id: session-title-llm
+  config:
+    targetWords: 5
+    targetCjkCharacters: 10
+    maxInputBytes: 4096
+    maxOutputTokens: 512
+    timeoutMs: 60000
+
 # ── Guest 游客 HTTP 桥 + 输出前自审门禁（host 层）──────────────────────────
 # 匿名访客对话 JSON API（/api/guest/*），驱动 customer-service-guest preset
 # 会话。路径在 Docker 内固定为 /app/customer-service。
@@ -154,7 +170,7 @@
         # 本次递增理由：输出前自审门禁落地（主机侧围栏状态机 + 三出口收口 + 前端块槽位渲染
         # 与表格/CRLF/NO_GATE 加固）。注意本值是**镜像构建戳**：改源码值不等于生效——须重建镜像，
         # 之后 /api/guest/health 的 version 才会反映新值；不重建则线上仍报旧值。
-        serviceVersion: '2026-09-11.11'
+        serviceVersion: '2026-09-11.12'
         # Customer-service Q&A is retrieval-grounded: pin a low reasoning
         # effort so one uncertain turn cannot burn ~15-20s on a long internal
         # reasoning chain before the first answer token reaches the visitor.
