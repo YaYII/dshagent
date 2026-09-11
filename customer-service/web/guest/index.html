@@ -39,6 +39,15 @@
   }
   header .langs button:hover { border-color: var(--brand); color: var(--brand); }
   header .langs button.active { background: var(--brand); border-color: var(--brand); color: #fff; }
+  /* 新对话按钮：低调的描边按钮，不抢语言切换的视觉权重 */
+  header .newchat { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px;
+    padding: 4px 10px; font-size: 12.5px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--brand); background: #fff; color: var(--brand); font-weight: 500; }
+  header .newchat:hover { background: var(--brand); color: #fff; }
+  header .newchat[disabled] { opacity: .5; cursor: default; }
+  /* 上下文过长提示条 */
+  .ctx-warn { margin: 0; padding: 8px 14px; font-size: 12.5px; text-align: center;
+    color: #92400e; background: #fffbeb; border-bottom: 1px solid #fde68a; }
   /* 服务标识条：会话工号 + 版本（问题定位） */
   .svc-badge {
     flex: 0 0 auto;
@@ -157,6 +166,12 @@
     border: 1px dashed var(--border); border-radius: 8px; background: #fafafa;
   }
   .sources { margin-top: 6px; font-size: 12px; color: var(--muted); }
+  /* 图形门禁：判定期占位与可读降级（P4/D2）。占位期间块内容不落 DOM，
+     因此这里只能看到一行文案 + 小转圈，看不到任何围栏源码。 */
+  .gate-pending, .gate-degraded { display: flex; align-items: center; gap: 8px; margin: 12px 0;
+    padding: 10px 12px; font-size: 13px; color: var(--muted); background: #fafbfc;
+    border: 1px dashed var(--border); border-radius: 10px; }
+  .gate-pending .spinner-sm { flex: 0 0 auto; }
   .sources span { background: var(--brand-weak); padding: 1px 6px; border-radius: 10px; margin-right: 6px; }
   #composer { flex: 0 0 auto; background: var(--panel); border-top: 1px solid var(--border); padding: 12px 20px; display: flex; gap: 10px; }
   #input {
@@ -220,6 +235,10 @@
     <button type="button" data-lang="en">EN</button>
     <button type="button" data-lang="pt">PT</button>
   </div>
+  <!-- 新对话：上下文过长会让页面变卡，这里一键清屏并从零开始（旧会话由服务端回收） -->
+  <button type="button" class="newchat" id="newChat" data-i18n-title="newChatTitle">
+    <span aria-hidden="true">＋</span><span data-i18n="newChat">新对话</span>
+  </button>
 </header>
 <!-- 服务标识条：报出会话工号即可定位是哪个会话、哪个版本（问题排查用） -->
 <div class="svc-badge" id="svcBadge" title="会话工号 + 版本号（问题定位用）">
@@ -245,6 +264,10 @@
   <button id="send" data-i18n="send">发送</button>
 </div>
 
+<!-- 图形门禁的纯决策砖块：先于页面脚本加载，页面只做 DOM 组合（Q2 分层）。
+     资产拿不到时不阻塞页面脚本——门禁模块缺失会让图形块一律降级（见 NO_GATE），
+     文字回答与来源引用照常工作。 -->
+<script src="assets/output-gate.js" onerror="window.__dshGateAssetFailed=true"></script>
 <script>
 (() => {
   'use strict'
@@ -275,7 +298,17 @@
       viewerDownload: '下载图片',
       viewerClose: '关闭（Esc）',
       imageUnavailable: '图片暂时无法显示（源站可能已移除该图）',
+      // 输出前自审门禁（D3 冻结键）：占位与降级文案，按类型区分
+      gatePreparing: '图形正在准备…',
+      gateDiagramUnavailable: '示意图暂时无法显示，您可以先看上面的文字说明。',
+      gateChartUnavailable: '图表暂时无法显示，您可以先看上面的文字说明。',
+      gateImageUnavailable: '图片暂时无法显示（源站可能已移除该图）。',
+      gateRichContentUnavailable: '这部分内容暂时无法显示，您可以先看上面的文字说明。',
       // 建议问题（欢迎页快捷提问），点击即发送
+      newChat: '新对话',
+      newChatTitle: '开始一段新的对话（清空当前记录）',
+      newChatConfirm: '确定开始新对话吗？当前对话记录将从界面清空。',
+      contextLong: '当前对话较长，继续提问可能变慢。建议点右上角「新对话」重新开始。',
       suggestions: ['客服热线是多少？', '如何缴交电费？', '遇到停电怎么办？', '电动车如何充电？'],
     },
     zhHant: {
@@ -301,7 +334,17 @@
       viewerDownload: '下載圖片',
       viewerClose: '關閉（Esc）',
       imageUnavailable: '圖片暫時無法顯示（來源站可能已移除該圖）',
+      // 輸出前自審門禁（D3 凍結鍵）
+      gatePreparing: '圖形正在準備…',
+      gateDiagramUnavailable: '示意圖暫時無法顯示，您可以先看上面的文字說明。',
+      gateChartUnavailable: '圖表暫時無法顯示，您可以先看上面的文字說明。',
+      gateImageUnavailable: '圖片暫時無法顯示（來源站可能已移除該圖）。',
+      gateRichContentUnavailable: '這部分內容暫時無法顯示，您可以先看上面的文字說明。',
       // 建議問題（歡迎頁快捷提問），點擊即傳送
+      newChat: '新對話',
+      newChatTitle: '開始一段新的對話（清空目前記錄）',
+      newChatConfirm: '確定開始新對話嗎？目前對話記錄將從介面清空。',
+      contextLong: '目前對話較長，繼續提問可能變慢。建議點右上角「新對話」重新開始。',
       suggestions: ['客服熱線是多少？', '如何繳交電費？', '遇到停電怎麼辦？', '電動車如何充電？'],
     },
     en: {
@@ -326,6 +369,16 @@
       viewerDownload: 'Download image',
       viewerClose: 'Close (Esc)',
       imageUnavailable: 'Image unavailable (it may have been removed from the source site)',
+      // Output gate (D3 frozen keys): placeholder and readable fallbacks
+      gatePreparing: 'Preparing the graphic…',
+      gateDiagramUnavailable: 'The diagram is temporarily unavailable; please refer to the text above.',
+      gateChartUnavailable: 'The chart is temporarily unavailable; please refer to the text above.',
+      gateImageUnavailable: 'The image is temporarily unavailable.',
+      gateRichContentUnavailable: 'This part of the content is temporarily unavailable; please refer to the text above.',
+      newChat: 'New chat',
+      newChatTitle: 'Start a new conversation (clears the current one)',
+      newChatConfirm: 'Start a new conversation? The current messages will be cleared from this screen.',
+      contextLong: 'This conversation is getting long, so replies may slow down. Consider starting a new chat from the top-right button.',
       suggestions: ['What is the customer service hotline?', 'How can I pay my electricity bill?', 'What should I do during a power outage?', 'How do I charge my electric vehicle?'],
     },
     pt: {
@@ -350,6 +403,16 @@
       viewerDownload: 'Transferir imagem',
       viewerClose: 'Fechar (Esc)',
       imageUnavailable: 'Imagem indisponível (pode ter sido removida do site de origem)',
+      // Portão de saída (chaves D3): marcador e alternativas legíveis
+      gatePreparing: 'A preparar o gráfico…',
+      gateDiagramUnavailable: 'O diagrama está temporariamente indisponível; consulte o texto acima.',
+      gateChartUnavailable: 'O gráfico está temporariamente indisponível; consulte o texto acima.',
+      gateImageUnavailable: 'A imagem está temporariamente indisponível.',
+      gateRichContentUnavailable: 'Esta parte do conteúdo está temporariamente indisponível; consulte o texto acima.',
+      newChat: 'Nova conversa',
+      newChatTitle: 'Iniciar uma nova conversa (limpa a atual)',
+      newChatConfirm: 'Iniciar uma nova conversa? As mensagens atuais serão removidas do ecrã.',
+      contextLong: 'Esta conversa está longa e as respostas podem ficar mais lentas. Considere iniciar uma nova conversa no botão superior direito.',
       suggestions: ['Qual é a linha de apoio ao cliente?', 'Como posso pagar a conta de eletricidade?', 'O que fazer durante uma falha de energia?', 'Como carrego o meu veículo elétrico?'],
     },
   }
@@ -438,6 +501,8 @@
     btn.addEventListener('click', () => applyLang(btn.dataset.lang, true))
   })
   applyLang(lang, false)
+  const newChatBtn = document.getElementById('newChat')
+  if (newChatBtn) newChatBtn.title = t('newChatTitle')
 
   /** Render the welcome-page suggested questions (click to ask). */
   function renderSuggestions() {
@@ -464,10 +529,16 @@
   const inputEl = document.getElementById('input')
   const sendEl = document.getElementById('send')
   let sessionId = localStorage.getItem('dshagent_session') || null
+  /**
+   * 本轮对话的往返数。上下文越长，模型侧的 prompt 越长、前端 DOM 也越重，
+   * 到一定程度页面会明显变卡；因此统计轮次并在偏长时提示访客开新对话。
+   */
+  let turnCount = 0
+  const CTX_WARN_TURNS = 12
 
   // ── 版本标识：每次发布递增，方便定位访客用的是哪个版本 ──────────────
   // 前端（此页面）版本号：改页面后 +1；服务端版本由 guest-server 注入。
-  const APP_VERSION = 'v2.9.1'
+  const APP_VERSION = 'v3.0.0'
   const svcAgentEl = document.getElementById('svcAgent')
   const svcVerEl = document.getElementById('svcVer')
   if (svcVerEl) svcVerEl.textContent = `前端 ${APP_VERSION} · 服务 --`
@@ -518,6 +589,62 @@
     : pagePath.replace(/\/[^/]*$/, '')
 
   /** Persist the session id so a page refresh resumes the same conversation. */
+  /**
+   * 上下文偏长提示：只出现一次，点「新对话」后自然消失。
+   */
+  function maybeWarnContext() {
+    if (turnCount < CTX_WARN_TURNS) return
+    if (document.getElementById('ctxWarn')) return
+    const bar = document.createElement('div')
+    bar.className = 'ctx-warn'
+    bar.id = 'ctxWarn'
+    bar.textContent = t('contextLong')
+    const header = document.querySelector('header')
+    header.after(bar)
+  }
+
+  /**
+   * 清空界面上的对话区，并复位所有"按轮隔离"的门禁台账（图形块槽位、块来源、
+   * 去重器都与上一轮绑定，不清会让新对话复用旧块的判定结果）。
+   */
+  function resetChatView() {
+    for (const node of chatEl.querySelectorAll('.msg')) node.remove()
+    const restoring = document.getElementById('restoring')
+    if (restoring) restoring.hidden = true
+    const warn = document.getElementById('ctxWarn')
+    if (warn) warn.remove()
+    if (welcomeEl) welcomeEl.hidden = false
+    blockSlots.clear()
+    blockOrder.length = 0
+    settledGates.clear()
+    reportDeduper.reset()
+    turnCount = 0
+  }
+
+  /**
+   * 「新对话」：结束当前会话（服务端回收 agent 内存），丢弃本地会话 id，清空界面，
+   * 再申请一个全新会话。进行中的回答会被忽略——其气泡已随清屏移除。
+   */
+  async function startNewChat() {
+    const button = document.getElementById('newChat')
+    if (button) button.disabled = true
+    const previous = sessionId
+    try {
+      resetChatView()
+      sessionId = null
+      try { localStorage.removeItem('dshagent_session') } catch { /* storage unavailable */ }
+      if (previous) {
+        // 回收旧会话：即使失败也不阻塞新对话（服务端另有 maxSessions 上限兜底）
+        fetch(`${API_BASE}/api/guest/session?sessionId=${encodeURIComponent(previous)}`, { method: 'DELETE' })
+          .catch(() => { /* 离线/网络异常：旧会话留待服务端自然回收 */ })
+      }
+      await ensureSession()
+    } finally {
+      if (button) button.disabled = false
+      inputEl.focus()
+    }
+  }
+
   function saveSession(id) {
     sessionId = id
     paintAgentBadge()
@@ -529,6 +656,156 @@
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c]))
 
+  /**
+   * 还原 `esc` 转义过的实体。`inlineMd` 是在已转义文本上做替换的，所以从 Markdown
+   * 里取出的 URL 可能带着 `&amp;`；白名单判定必须针对**原始地址**，否则含 `&` 的
+   * 路径会因实体形态而与正则不符（判定口径应与围栏通道一致）。
+   * @param s - 可能含实体的文本
+   * @returns 还原后的文本
+   */
+  function unescapeHtml(s) {
+    return String(s).replace(/&(amp|lt|gt|quot|#39);/g, m => ({
+      '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'",
+    }[m]))
+  }
+
+  /** 受控围栏的语言标记（P1）；`img` 与 `image` 同义。 */
+  const CONTROLLED_LANGS = ['mermaid', 'chart', 'image', 'img', 'html']
+
+  /**
+   * 在**行内任意位置**识别受控围栏起始行（P1，不要求行首）。
+   *
+   * 为什么不能锚定行首：行首判据只认 `^```mermaid`，于是「列表内缩进围栏」
+   * （`   ```mermaid`）、「引用块围栏」（`> ```mermaid`）、「正文提及」三种形态
+   * 一律落空 → 落入普通段落 → `esc()` 后**连围栏符带块体源码一起上屏**。这三类
+   * 都是模型很自然的排版，实测均泄漏（契约 §5 早已点名此风险）。
+   * 口径「≥3 个同类围栏字符 + 其后首词为受控关键字」与主机侧 `fence-machine.ts`
+   * 的逐字符扫描一致；非受控语言（python/bash 等）不受影响（N2③）。
+   * @param line - 一行原文（不含换行符）
+   * @returns `{ at, char, run, lang, info }`（受控块，lang 已规范化为 image）或 null
+   */
+  /**
+   * 去掉行尾的 `\r`（CRLF 输入的归一化；只作用于判定用的行副本）。
+   *
+   * 与主机侧 `fence-machine.ts` 的 `stripCr` 同口径：后端先剥 `\r`、前端此前没剥，
+   * 于是**同一份 CRLF 输入两侧结论相反**——起始行 `"```mermaid\r"` 前端不识别、
+   * 闭合行 `"```\r"` 前端判为**非闭合**，受控围栏因此落入普通代码块，
+   * 标记与块体源码一起进访客 DOM（SRC1 级）。归一化放在**判据函数入口**而非
+   * `renderMarkdown` 的 `split` 处：这两个判据还被 `tableCell()`（表格单元格路径）
+   * 直接调用，只改 split 会漏掉那条路径。
+   *
+   * **已知差异（本次刻意不修）——前置空白字符类**：主机侧闭合判据用 `\s`（含
+   * NBSP `\u00a0`/VT/FF/BOM），前端用 `[ \t]`（更窄）。对齐它会把"NBSP 缩进的围栏"
+   * 从「正文」改成「受控块并降级」，即**改变既有行为**；而本次修复的成因只有一个
+   * （行尾 CR 未归一化）。两者混在一次改动里会破坏「分开自证」，故如实记录为
+   * **已知差异**，不在此处顺手对齐。
+   * @param line - 一行原文
+   * @returns 去掉了行尾 `\r` 的行
+   */
+  function stripCr(line) {
+    return typeof line === 'string' && line.endsWith('\r') ? line.slice(0, -1) : line
+  }
+
+  function matchControlledFence(line) {
+    if (typeof line !== 'string') return null
+    // 归一化行尾 CR：CRLF 输入下不剥会让受控起始围栏整体识别失败（见 stripCr 注释）
+    const normalized = stripCr(line)
+    // 刻意不锚定行首；`at` 是围栏符起点，用于保留其前面的正文（防吞字）
+    const m = /(`{3,}|~{3,})[ \t]*([A-Za-z][\w-]*)[ \t]*(.*)$/.exec(normalized)
+    if (m === null) return null
+    const lang = m[2].toLowerCase()
+    if (CONTROLLED_LANGS.indexOf(lang) === -1) return null
+    return {
+      at: m.index,
+      char: m[1][0],
+      run: m[1].length,
+      lang: lang === 'img' ? 'image' : lang,
+      info: m[3].trim(),
+    }
+  }
+
+  /**
+   * 判断一行是否为受控块的**闭合行**（P2）。
+   *
+   * 刻意比起始判据严：要求整行只有 ≥ 起始长度的**同类**围栏字符（允许前后空白）。
+   * 若闭合也「行内任意命中」，块体内形如 `<p>a ``` b</p>` 的行会**提前闭合**，
+   * 块体余下部分改走段落分支被 `esc()` 上屏——那不是修漏，是换个地方漏。
+   * 该口径与主机侧 `fence-machine.ts` 的 `isClosingFence` 一致。
+   * @param line - 一行原文
+   * @param char - 起始围栏字符（`` ` `` 或 `~`）
+   * @param minLen - 起始围栏长度（闭合长度须 ≥ 它）
+   * @returns 闭合行返回 true
+   */
+  function isClosingFence(line, char, minLen) {
+    if (typeof line !== 'string') return false
+    // 归一化行尾 CR：CRLF 下 `"```\r"` 若不剥则整行不是"纯围栏字符"，会被判为非闭合
+    // （两侧结论相反：主机侧剥 CR 后判闭合）。见 stripCr 注释。
+    const m = /^[ \t]*([`~]+)[ \t]*$/.exec(stripCr(line))
+    return m !== null && m[1][0] === char && m[1].length >= minLen
+  }
+
+  /**
+   * 单元格内的**闭合围栏**判定，供 {@link tableCell} 调用。
+   *
+   * 与 {@link isClosingFence} 同口径（同类字符、长度 ≥ 起始长度），差别只在作用对象：
+   * 行级判据要求**整行**只有围栏字符，而单元格已被 `|` 切碎、闭合符可能与块体同处
+   * 一格（`` graph TD X ``` ``），故这里找「片段内某处起到片段末尾全为同类围栏字符」
+   * 的**最右**位置。不锚定片段起点是有意的：锚定会让「块体+闭合符同格」判不出闭合，
+   * 整格随即被当块体丢弃（少一句正文）——那是误伤，不是安全。长度不放宽，保证
+   * `` ``` `` 开的块不会被 ```` ```` `` 之前更短的序列提前闭合。
+   * @param fragment - 待判片段
+   * @param char - 起始围栏字符（`` ` `` 或 `~`）
+   * @param minLen - 起始围栏长度（闭合长度须 ≥ 它）
+   * @returns 命中时返回闭合符在 fragment 中的起点，否则 `-1`
+   */
+  function cellClosingFenceAt(fragment, char, minLen) {
+    const m = /([`~]+)[ \t]*$/.exec(stripCr(fragment))
+    if (m === null) return -1
+    const run = m[1]
+    if (run[0] !== char || run.length < minLen) return -1
+    return m.index
+  }
+
+  /**
+   * 表格单元格的受控围栏消费（F-1）。
+   *
+   * 单元格是**被 `|` 切碎的片段**，不能套用行级判据：块体可能与标记同处一格
+   * （`` | 流程 | ```mermaid graph TD X | ``），也可能落在**后续数据行**
+   * （`` | 流程 | ```mermaid | `` 之后接 `` | graph TD X | ``）。故按「片段有界的小
+   * 状态机」处理，两条不变量：
+   *   1. 起始标记**之后**的任何文本都不作为正文出现——它只能是块体（丢弃）或闭合围栏。
+   *      旧实现把标记之后的剩余文本一律当正文 `esc()` 拼回，块体与标记同行时块体因此
+   *      成了"尾随文字"上屏（F-1）。
+   *   2. 块体态下整格丢弃——闭合围栏之前的内容同样属于块体，保留它等于换个位置漏。
+   *      块体态只在**见到闭合围栏**时结束；否则延续到后续单元格/数据行，与行级分支
+   *      「未闭合块消费到输入末尾」同口径：宁可少一句正文，不把块体源码上屏。
+   * 标记之前的正文照常上屏（与行级分支的防吞字口径一致）。
+   * @param cell - 已 `trim()` 的单元格文本
+   * @param run - 跨单元格延续的块体状态：`[]` 或 `[{ char, minLen }]`
+   * @returns 单元格 HTML（不做行内 Markdown 展开，保持原行为）
+   */
+  function tableCell(cell, run) {
+    const state = run === undefined ? [] : run
+    const open = state.length > 0 ? state[0] : null
+    if (open !== null) {
+      if (cellClosingFenceAt(cell, open.char, open.minLen) !== -1) state.length = 0
+      return ''
+    }
+    const fence = matchControlledFence(cell)
+    if (fence === null) return esc(cell)
+    const before = cell.slice(0, fence.at).trim()
+    // 标记之后的剩余文本：剥掉「围栏符 + 语言词」，余下即块体（或闭合符）。
+    const rest = cell.slice(fence.at).replace(/^[`~]+[ \t]*[A-Za-z][\w-]*/, '')
+    const parts = []
+    if (before !== '') parts.push(esc(before))
+    parts.push(esc(degradeText(fence.lang)))
+    // 未在同一格闭合 ⇒ 块体态延续到后续单元格/数据行，直到闭合或整表结束。
+    if (cellClosingFenceAt(rest, fence.char, fence.run) === -1) {
+      state.push({ char: fence.char, minLen: fence.run })
+    }
+    return parts.join(' ')
+  }
+
   /** Minimal inline Markdown: paragraphs, code, tables, lists, images, links. */
   function renderMarkdown(src) {
     const lines = src.split(/\n/)
@@ -537,39 +814,73 @@
     let inList = false
     while (i < lines.length) {
       const line = lines[i]
-      const codeFence = /^```\s*([\w-]*)\s*(.*)$/.exec(line)
-      if (codeFence) {
+      // 受控围栏（P1）：行内任意位置可识别，非行首命中同样进受控分支。
+      const fence = matchControlledFence(line)
+      if (fence !== null) {
         inList = false
-        const lang = codeFence[1].toLowerCase()
-        // 语言后可能跟着图表关键字（如 ```mermaid mindmap），一并交给渲染器
-        const info = codeFence[2].trim()
+        // 围栏符之前的正文照常上屏（防吞字）；但剥掉 Markdown 结构符号（`>`、`-`、
+        // `1.` 等）——它们是排版标记，不是访客该看到的正文。
+        const prefix = line.slice(0, fence.at).replace(/^[ \t>]*(?:[-*+]|\d+[.)])?[ \t]*/, '').trim()
+        if (prefix !== '') out.push(`<p>${inlineMd(prefix)}</p>`)
         const buf = []
         i++
         let closed = false
         while (i < lines.length) {
-          if (/^```/.test(lines[i])) { closed = true; break }
+          if (isClosingFence(lines[i], fence.char, fence.run)) { closed = true; break }
           buf.push(lines[i])
           i++
         }
         if (closed) i++ // closing fence
         const body = buf.join('\n')
-        // 流式回答里围栏还没收尾时先当代码块：半截路径/半截语法拿去渲染会发出
-        // 无效请求（实测 /uploads/tos_bg_d37 被请求 → 404）并造成闪动。
-        const needsClose = lang === 'mermaid' || lang === 'image' || lang === 'img' || lang === 'chart' || lang === 'html'
-        if (needsClose && !closed) {
-          out.push(`<pre><code>${esc(body)}</code></pre>`)
+        // 未闭合的受控块只给占位，绝不把块体当代码块贴出来（P4/V1）——旧实现正
+        // 是在这里把半截围栏当代码块上屏，访客在第 70 个 delta 就看到了源码。
+        // 半截路径/半截语法也不会被拿去渲染：占位阶段不发起任何请求。
+        if (!closed) {
+          if (blockSourcePolicy() === 'block-events') continue
+          out.push(`<div class="gate-block" data-block-type="${esc(fence.lang)}" data-block-state="pending">${pendingPlaceholder()}</div>`)
           continue
         }
-        if (lang === 'mermaid') out.push(renderMermaidBlock(info, body))
-        else if (lang === 'image' || lang === 'img') out.push(renderImageBlock(body))
-        else if (lang === 'chart') out.push(renderChart(body))
-        else if (lang === 'html') out.push(renderHtmlBlock(body))
-        else out.push(`<pre><code>${esc(body)}</code></pre>`)
+        // 四类图形块一律产出「占位/终态」元素（逻辑见 gatePlaceholderHtml）：
+        // 判定期只出 data-block-state 占位，通过判据后才换成 SVG/图片/iframe/图表。
+        // 这里不再直接返回渲染结果——旧实现会在这一行就发出图片请求并被跳过门禁。
+        // **仅当本轮由围栏扫描供块**（旧后端兜底）时才产出。若本轮已收到 block 事件，
+        // 图形块由主机侧权威事件提供：正文里再出现受控围栏属协议异常，这里跳过，
+        // 避免同一轮出现两个块来源。裁决见 chooseBlockSource。
+        if (blockSourcePolicy() === 'block-events') continue
+        out.push(gateBlockHtml(fence.lang, fence.info, body))
+        continue
+      }
+      // 普通代码块（python/bash 等）：不在门禁范围（N2③），照旧展示。但块体里若
+      // 嵌了**受控**围栏（` ```mermaid ` 等），必须把它摘出来交门禁——否则它会随
+      // `esc()` 原样上屏（契约 §5：普通代码块「其中出现的图形围栏仍会被摘出」）。
+      const plainFence = /^[ \t]*(`{3,}|~{3,})\s*([\w-]*)\s*(.*)$/.exec(line)
+      if (plainFence) {
+        inList = false
+        const plainChar = plainFence[1][0]
+        const plainRun = plainFence[1].length
+        const buf = []
+        i++
+        let closed = false
+        while (i < lines.length) {
+          // 内层受控围栏：中断本普通块，把余下内容交回行级循环（受控分支会摘它）。
+          if (matchControlledFence(lines[i]) !== null) break
+          if (isClosingFence(lines[i], plainChar, plainRun)) { closed = true; break }
+          buf.push(lines[i])
+          i++
+        }
+        if (closed) i++ // closing fence
+        // 闭合判据与受控分支同口径（不硬编码长度/字符）：裸 `/^```/` 会把内层
+        // ` ```mermaid ` 当闭合行而在错误位置截断，余下块体随之落入正文段落。
+        // 命中内层受控围栏时不消费该行——交回行级循环由受控分支摘出。
+        out.push(`<pre><code>${esc(buf.join('\n'))}</code></pre>`)
         continue
       }
       const tableStart = /^\s*\|.*\|\s*$/.test(line) && i + 1 < lines.length && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i + 1])
       if (tableStart) {
         inList = false
+        // 块体态跨单元格/跨数据行延续（F-1）：标记与块体可能分处两格甚至两行，
+        // 由 `run` 在整表范围内共享，闭合或整表消费结束时清空。
+        const cellRun = []
         const header = line.split('|').map(s => s.trim()).filter((s, idx, a) => !(idx === 0 && s === '') && !(idx === a.length - 1 && s === ''))
         i += 2
         const rows = []
@@ -577,9 +888,21 @@
           rows.push(lines[i].split('|').map(s => s.trim()).filter((s, idx, a) => !(idx === 0 && s === '') && !(idx === a.length - 1 && s === '')))
           i++
         }
-        out.push(`<table><thead><tr>${header.map(h => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${
-          rows.map(r => `<tr>${r.map(c => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')
+        out.push(`<table><thead><tr>${header.map(h => `<th>${tableCell(h, cellRun)}</th>`).join('')}</tr></thead><tbody>${
+          rows.map(r => `<tr>${r.map(c => `<td>${tableCell(c, cellRun)}</td>`).join('')}</tr>`).join('')
         }</tbody></table>`)
+        // 表格消费完毕但块体态仍开着：标记之后的块体已跨出表格边界，后续行同属该图形
+        // 块，必须继续消费到闭合围栏或输入末尾——否则它们落回行级循环被当正文上屏
+        // （`` graph TD X `` 会成 `<p>`）。与行级分支「未闭合块消费到输入末尾」同口径。
+        if (cellRun.length > 0) {
+          const open = cellRun[0]
+          while (i < lines.length) {
+            const close = isClosingFence(lines[i], open.char, open.minLen)
+            i++
+            if (close) break
+          }
+          cellRun.length = 0
+        }
         continue
       }
       const listMatch = /^\s*[-*]\s+(.*)/.exec(line)
@@ -606,25 +929,20 @@
   }
 
   /**
-   * 知识库图片地址归一化：vault 里存的是源站绝对路径（/uploads/xxx.png，源站
-   * 为 www.cem-macau.com），统一改走本站反向代理 /uploads/ —— 访客从我们这里
-   * 同源取图，https 页面下不会触发混合内容拦截，也能被 nginx 缓存。
-   * @param url - 原文里的图片地址
-   * @returns 页面可直接加载的地址
+   * Inline formatting: bold, code, image, link.
+   *
+   * 行内图片 `![alt](url)` 是第 5 条图片通道（IMG2 明列），与 ```image 围栏共用
+   * **同一个**白名单判定（`G.checkImagePath`）——单一实现，不允许两处各写一份正则。
+   * 非法地址一律只留 alt 文本、**不产出 `<img>`**（零请求）。
    */
-  function imageSrcOf(url) {
-    const m = /^(?:https?:\/\/(?:www\.)?cem-macau\.com)?(\/uploads\/[^\s)]+)$/.exec(url)
-    return m ? `${API_BASE}${m[1]}` : url
-  }
-
-  /** Inline formatting: bold, code, image, link. */
   function inlineMd(s) {
     let t = esc(s)
     t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     t = t.replace(/`([^`]+)`/g, '<code>$1</code>')
     t = t.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_m, alt, url) => {
-      if (/^(https?:|data:image\/|\/)/.test(url)) {
-        return `<img src="${esc(imageSrcOf(url))}" alt="${esc(alt)}" loading="lazy" decoding="async" width="1000" height="560">`
+      const checked = G.checkImagePath(unescapeHtml(url))
+      if (checked.ok) {
+        return `<img src="${esc(G.toImageSrc(checked.path, API_BASE))}" alt="${esc(alt)}" loading="lazy" decoding="async" width="1000" height="560">`
       }
       return `[${esc(alt)}]`
     })
@@ -633,25 +951,6 @@
       return label
     })
     return t
-  }
-
-  /**
-   * ```image 代码块 → 知识库图片。模型按约定把图片路径放进块内（可再跟一行
-   * 说明），路径统一走本站 /uploads 反向代理；加载失败时由委托的 error 监听
-   * 降级成提示文字，不会留破图。
-   */
-  function renderImageBlock(body) {
-    const lines = body.split('\n').map(line => line.trim()).filter(Boolean)
-    const raw = (lines[0] || '').replace(/^`+|`+$/g, '')
-    // 只认完整图片地址（data: 或带图片扩展名的路径），半截路径一律不请求
-    const looksLikeImage = /^data:image\//.test(raw)
-      || (/^(https?:|\/)/.test(raw) && /\.(png|jpe?g|gif|webp|avif|svg|bmp)(\?|#|$)/i.test(raw))
-    if (!looksLikeImage) return `<pre><code>${esc(body)}</code></pre>`
-    const caption = lines.slice(1).join(' ')
-    // width/height 属性让浏览器提前按比例预留空间：图片到达时不再把下方内容顶下去
-    return `<figure class="kb-image"><img src="${esc(imageSrcOf(raw))}" alt="${esc(caption)}" loading="lazy" decoding="async" width="1000" height="560">`
-      + (caption ? `<figcaption>${esc(caption)}</figcaption>` : '')
-      + '</figure>'
   }
 
   /** 沙箱预览里的基础排版：模型 HTML 没带样式时也不至于是一坨裸标签，并且
@@ -830,11 +1129,16 @@
    * CSP 把脚本限制到本页写入的那一段（随机 nonce），并禁止表单提交、外部请求与
    * base-uri。因此 HTML 能正常排版、能自适应高度，却拿不到本页 DOM/Cookie。
    * 高度由子文档回传、父页面按视口夹紧（手机不会一屏占满，PC 不会截断内容）。
+   *
+   * 门禁（C3）：空白块、超过单块字节上限的块一律降级为可读文案，绝不把可疑内容
+   * 塞进沙箱。沙箱属性与 CSP 是安全不变量，不得因门禁而放宽。
    */
   function renderHtmlBlock(body) {
+    const checked = G.checkHtmlBlock(body, GATE_MAX_BLOCK_BYTES)
+    if (!checked.ok) return evidenceHint('html', checked.reason, body)
     const nonce = Math.random().toString(36).slice(2) + Date.now().toString(36)
     const doc = '<!doctype html><meta charset="utf-8">'
-      + `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; form-action 'none'; base-uri 'none'; script-src 'nonce-${nonce}'">`
+      + `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; form-action 'none'; base-uri 'none'; script-src 'nonce-${nonce}'">`
       + `<style>${HTML_PREVIEW_CSS}</style>`
       + body
       // 注意：字符串里必须是 <\/script>，否则 HTML 解析器会提前结束本页脚本块
@@ -874,33 +1178,447 @@
     for (const frame of document.querySelectorAll('.html-frame')) applyHtmlFrameHeight(frame)
   })
 
-  /** Render a ```chart JSON block into a simple horizontal bar list. */
-  function renderChart(body) {
-    try {
-      const data = JSON.parse(body)
-      if (!Array.isArray(data)) return `<pre><code>${esc(body)}</code></pre>`
-      const rows = data.map(d => {
-        const label = d.label ?? d.name ?? '?'
-        const value = Number(d.value ?? d.count ?? 0)
-        const max = Math.max(...data.map(x => Number(x.value ?? x.count ?? 0)), 1)
-        const pct = max > 0 ? Math.round(value / max * 100) : 0
-        return `<div class="bar-row"><span class="label">${esc(label)}</span><div class="bar" style="width:${Math.max(pct, 2)}%"></div><span>${value}</span></div>`
-      }).join('')
-      return `<div class="chart">${rows}</div>`
-    } catch {
-      return `<pre><code>${esc(body)}</code></pre>`
+  // ── 图形门禁执行端（需求 §5/§10/§11；决策逻辑全在 assets/output-gate.js）─────
+  // 页面这一层只做三件事：按结论创建元素、把真机实测数据交给判据、把失败回传给
+  // 服务端留痕。判断「能不能显示」的规则一行都不写在这里（Q2 分层）。
+  const gate = window.DshOutputGate
+  if (!gate) {
+    // 门禁脚本没加载成功：这是 C8 明确禁止「把未校验的块直接渲染」的情形。页面
+    // 不抛异常、不影响文字回答，但记录一次以便定位资产缺失。
+    console.warn('[guest] output-gate.js 未加载，图形块将一律降级')
+  }
+  const NO_GATE = {
+    GATE_REASONS: { libraryUnavailable: 'library-unavailable', renderEmpty: 'render-empty' },
+    // 三态补全：页面按 `G.GATE_STATES.<state>` 取状态字面量，缺键得到 undefined
+    // （不抛错，但会让状态机判断失真）。与真实模块同形，属完整性项。
+    GATE_STATES: {
+      absent: 'absent', pending: 'pending', loading: 'loading',
+      validating: 'validating', passed: 'passed', degraded: 'degraded',
+    },
+    PENDING_KEY: 'gatePreparing',
+    DEFAULT_REPORT_PATH: '/api/guest/render-report',
+    // 与真实模块同值（C5 异常宽高比阈值）。它是页面真实访问的成员（判据入参），
+    // 缺失会让 `checkRendered(..., {maxAspectRatio: undefined})` 走到非预期分支。
+    DEFAULT_MAX_ASPECT_RATIO: 40,
+    // 完整性项（**非崩溃点**）：页面仅在注释里提到该名字，无真实成员访问；补上
+    // 以免后人按名字检索时看到一个"看起来应该有"的缺口。取值与 §12 冻结默认一致。
+    blockTimeoutMs: 1500,
+    DEGRADE_KEYS: {
+      mermaid: 'gateDiagramUnavailable', chart: 'gateChartUnavailable',
+      image: 'gateImageUnavailable', html: 'gateRichContentUnavailable',
+    },
+    checkImagePath: () => ({ ok: false, path: null, reason: 'image-path-invalid' }),
+    toImageSrc: () => null,
+    checkChartData: () => ({ ok: false, rows: null, reason: 'chart-invalid' }),
+    checkHtmlBlock: () => ({ ok: false, reason: 'html-invalid' }),
+    checkRendered: () => ({ ok: false, reason: 'render-empty', detail: null }),
+    /**
+     * 受控块类型规范化（与真实模块同形）：`img` 归一为 `image`，未知类型返回 null。
+     * 页面按 `G.normalizeBlockType(x) || 'html'` 使用，故 null 是安全的降级值。
+     * @param value - 待规范化的块类型
+     * @returns 规范类型或 null
+     */
+    normalizeBlockType: value => {
+      const v = typeof value === 'string' ? value.toLowerCase() : ''
+      if (v === 'img') return 'image'
+      return ['mermaid', 'chart', 'image', 'html'].indexOf(v) === -1 ? null : v
+    },
+    /**
+     * 块来源单一裁决（与真实模块同口径）。
+     * @param input - `{ sawBlockEvent }`
+     * @returns 来源标识
+     */
+    chooseBlockSource: input => ((input && input.sawBlockEvent) ? 'block-events' : 'fence-fallback'),
+    /**
+     * 载荷解码（降级版）：**必须返回非空 `block`** —— 页面在 `applyBlockPayload` 里
+     * 直接读 `decoded.block.blockType`，返回 null 会抛 `Cannot read properties of null`，
+     * 反而把"降级"变成"整条回答失败"（正是本缺陷要消灭的形态）。故给出
+     * `decision:'degraded'` 的空源码块，让每个块都落到可读降级文案。
+     * @param payload - 主机侧 block 事件载荷
+     * @returns `{ ok:false, block }`
+     */
+    decodeBlockPayload: payload => {
+      const raw = payload && typeof payload === 'object' ? payload : {}
+      return {
+        ok: false,
+        block: {
+          blockId: typeof raw.blockId === 'string' ? raw.blockId : '',
+          blockType: NO_GATE.normalizeBlockType(raw.blockType) || 'html',
+          source: '',
+          sourceBytes: 0,
+          decision: 'degraded',
+          reason: NO_GATE.GATE_REASONS.libraryUnavailable,
+        },
+      }
+    },
+    // 门禁资产缺失时文字照常上屏、图形块全降级：围栏识别交给 renderMarkdown 自身的
+    // 兜底分支（未闭合 → 占位；已闭合 → 交回上面这些一律判失败的判据），整条回答
+    // 不会因为门禁而失败（C8）。
+    byteLength: text => String(text === null || text === undefined ? '' : text).length,
+    shortDigest: text => String(text === null || text === undefined ? '' : text).length.toString(16),
+    textKeyFor: (state, type) => (state === 'degraded'
+      ? (NO_GATE.DEGRADE_KEYS[type] || 'gateRichContentUnavailable')
+      : 'gatePreparing'),
+    createReportDeduper: () => ({ shouldSend: () => false, reset: () => {} }),
+    buildReport: () => null,
+  }
+  const G = gate || NO_GATE
+
+  // 门禁预算与端点：默认值与 guest-server Config 的冻结默认值一致（§12）；服务端
+  // 若在 `meta` 事件里下发 gate 字段则以服务端为准，保证单点可调（G1）。
+  let GATE_BLOCK_TIMEOUT_MS = 1500
+  let GATE_ANSWER_WAIT_BUDGET_MS = 600
+  let GATE_LIBRARY_LOAD_TIMEOUT_MS = 8000
+  let GATE_MAX_BLOCK_BYTES = 32768
+  let GATE_REPORT_PATH = G.DEFAULT_REPORT_PATH || '/api/guest/render-report'
+
+  /**
+   * 采纳服务端下发的门禁配置（缺项保持默认，非法值直接忽略）。
+   * @param config - `meta`/`done` 事件里的 `gate` 字段
+   */
+  function applyGateConfig(config) {
+    if (!config || typeof config !== 'object') return
+    const pick = (key, current) => (Number.isFinite(config[key]) && config[key] > 0 ? config[key] : current)
+    GATE_BLOCK_TIMEOUT_MS = pick('blockTimeoutMs', GATE_BLOCK_TIMEOUT_MS)
+    GATE_ANSWER_WAIT_BUDGET_MS = pick('answerWaitBudgetMs', GATE_ANSWER_WAIT_BUDGET_MS)
+    GATE_LIBRARY_LOAD_TIMEOUT_MS = pick('libraryLoadTimeoutMs', GATE_LIBRARY_LOAD_TIMEOUT_MS)
+    GATE_MAX_BLOCK_BYTES = pick('maxBlockBytes', GATE_MAX_BLOCK_BYTES)
+    if (typeof config.reportPath === 'string' && config.reportPath.startsWith('/')) {
+      GATE_REPORT_PATH = config.reportPath
+    }
+  }
+
+
+  /** 本轮回答的起点与回传去重器（每轮 send() 开始时重置）。 */
+  let gateTurnStart = Date.now()
+  /** `done` 帧到达时刻，作为 T1 预算（≤600ms）的起点。 */
+  let doneFrameAt = 0
+  const reportDeduper = G.createReportDeduper()
+
+  /**
+   * 本轮已结算的块状态（blockKey → state）。用于 P7 的「`done` 前结算窗口」：
+   * 到 `done` 仍未结算的块必须按降级处理，且**不得阻塞 `done`**。
+   */
+  const settledGates = new Set()
+
+  // ── 口径 B：主机侧结构化 block 事件的访客端台账（E5/E6）─────────────────
+  // 主机侧（plugins/output-gate）在 delta 流上做跨分帧识别，把图形块摘成三件事：
+  // `block-open`（占位）→ `block`（裁决结果）→ `done`（blocks/blockResults 权威终态）。
+  // 访客端只消费这些事件，不再自行从文字流里解析围栏——这是「主机侧不可绕过」
+  // 在访客端的落点（E2），也保证围栏源码从不进入访客 DOM 或内存文本。
+  const blockSlots = new Map()
+  const blockOrder = []
+  /**
+   * 本轮是否收到过 block 事件。它是**唯一的块来源开关**：一旦为 true，正文围栏
+   * 扫描即停止产出图形块，避免同一轮内出现两个事实源（重复渲染/互相覆盖）。
+   * 裁决规则在 output-gate.js 的纯函数 `chooseBlockSource`，页面不自己判。
+   */
+  let sawBlockEvent = false
+
+  /**
+   * 当前轮的块来源裁决（委托纯函数，可单测）。
+   *
+   * **该兜底分支仅服务旧后端**（部署早于 t3、正文仍含围栏、不下发 block 事件）。
+   * 口径 B 下 `delta` 正文已被主机侧摘空，这里根本不会命中围栏；一旦本轮收到任何
+   * `block-open`/`block`，本函数即返回 `'block-events'`，围栏路径被门控短路——
+   * 因此它不会演变成「第二事实源」，而是旧后端兼容层。守护测试见
+   * `tests/output-gate-check.mjs` 的「块来源唯一裁决」与「页面把块来源收敛到单一
+   * 裁决点」两条，以及 `tests/gate-dom-check.mjs` 的「路径 B（兜底）」。
+   *
+   * 触发时机刻意放在**每帧**而不是只在 `done`：旧后端流式期围栏会分帧到达，
+   * 若只在 `done` 才解析，中间那些帧的正文里就是明文围栏（实测会命中 V1/SRC5
+   * 泄漏判据）。每帧解析保证任何时刻都不裸奔（实测 30 采样点泄漏 0）。
+   * @returns `'block-events'`（主机侧权威，口径 B）或 `'fence-fallback'`（旧后端兜底）
+   */
+  function blockSourcePolicy() {
+    return G.chooseBlockSource({ sawBlockEvent })
+  }
+
+  /**
+   * 取（必要时创建）某气泡的 block 槽位容器。按气泡隔离——多个回答同时在屏时
+   * 各自的块不能互相串。
+   */
+  function blocksHostOf(bubble) {
+    let host = bubble.querySelector(':scope > .gate-blocks')
+    if (!host) {
+      host = document.createElement('div')
+      host.className = 'gate-blocks'
+      bubble.appendChild(host)
+    }
+    return host
+  }
+
+  /** 把 `block` 事件的裁决结果并入槽位台账。 */
+  function applyBlockPayload(decoded, raw) {
+    const blockId = (raw && raw.blockId) || decoded.block.blockId
+    const slot = blockSlots.get(blockId) || { blockId, blockType: decoded.block.blockType || 'html' }
+    slot.blockType = decoded.block.blockType || slot.blockType
+    slot.decision = decoded.block.decision
+    slot.reason = decoded.block.reason || ''
+    if (decoded.ok) {
+      slot.source = decoded.block.source
+      slot.sourceBytes = decoded.block.sourceBytes
+      slot.imagePath = decoded.block.imagePath || ''
+      slot.imageCaption = decoded.block.imageCaption || ''
+    } else {
+      // 降级：主机侧已判定不可显示，或载荷异常——两种情况都不持有源码
+      slot.source = ''
+      slot.decision = 'degraded'
+    }
+    blockSlots.set(blockId, slot)
+    if (!blockOrder.some(item => item.blockId === blockId)) {
+      blockOrder.push({ blockId, blockType: slot.blockType })
+    }
+  }
+
+  /** 用 `done` 下发的权威终态纠正本地槽位（E1：三出口终态一致）。 */
+  function adoptDoneBlocks(data) {
+    const results = data.blockResults && typeof data.blockResults === 'object' ? data.blockResults : {}
+    const degraded = Array.isArray(data.degradedIds) ? data.degradedIds : []
+    for (const payload of data.blocks) {
+      if (!payload || typeof payload.blockId !== 'string') continue
+      const decoded = G.decodeBlockPayload(payload)
+      const slot = blockSlots.get(payload.blockId)
+      // 已进入 passed 的块不回改（REP5）；其余按 done 的权威结论补齐
+      if (slot && slot.decision === 'render' && slot.settled === 'passed') continue
+      applyBlockPayload(decoded, payload)
+      const target = blockSlots.get(payload.blockId)
+      if (degraded.indexOf(payload.blockId) !== -1 || results[payload.blockId] === 'degraded') {
+        target.decision = 'degraded'
+        target.source = ''
+      }
     }
   }
 
   /**
-   * ```mermaid 代码块 → 渲染容器。mermaid 体积 3.5MB，只在回答里真的出现
-   * 图表时才懒加载（见 renderDiagrams），访客平时完全不下载。容器里先放
-   * 原始代码作为兜底：库加载失败或语法错误时，用户看到的仍是可读的代码。
+   * 刷新槽位容器：重渲染 HTML，但把已开判/已终态的**真节点**原位搬回。
+   * 直接 `innerHTML = ...` 会把在飞的 mermaid 容器与 `<img>` 一起销毁（同一块
+   * 反复从 pending 重来），所以刷新必须与 `paintStream` 一样做节点搬运。
+   * @param bubble - 气泡
+   * @returns 槽位容器
    */
-  function renderMermaidBlock(info, body) {
-    const head = body.trimStart()
-    const src = info && !head.startsWith(info) ? `${info}\n${body}` : body
-    return `<div class="mermaid-src" data-src="${esc(src)}"><pre><code>${esc(src)}</code></pre></div>`
+  function refreshBlockSlots(bubble) {
+    const host = blocksHostOf(bubble)
+    const live = new Map()
+    for (const node of host.querySelectorAll('[data-block-key]')) {
+      const state = node.dataset.blockState
+      if (state && state !== G.GATE_STATES.pending) live.set(node.dataset.blockKey, node)
+    }
+    host.innerHTML = renderBlockSlots()
+    for (const placeholder of host.querySelectorAll('[data-block-key]')) {
+      const node = live.get(placeholder.dataset.blockKey)
+      if (node) placeholder.replaceWith(node)
+    }
+    return host
+  }
+
+  /**
+   * 渲染 block 槽位容器。三种形态：
+   * - `decision` 未定（只收到了 `block-open`）→ **占位**（判定期唯一允许的呈现）
+   * - `decision === 'render'` → 占位（真机裁决由 startClosedGates 接手）
+   * - `decision === 'degraded'` → 可读降级文案
+   * 源码只进内存台账，任何形态都不把它写进 DOM。
+   */
+  function renderBlockSlots() {
+    return blockOrder.map(item => {
+      const slot = blockSlots.get(item.blockId) || { blockType: item.blockType }
+      const type = slot.blockType || 'html'
+      // `block-open` 之后的待裁决态：只出占位（不得当成 degraded，否则块在裁决
+      // 到达前就被判死；也不得渲染，因为源码还没到）
+      if (slot.decision === undefined || slot.decision === null) {
+        return `<div class="gate-block" data-block-type="${esc(type)}" data-block-state="pending">${pendingPlaceholder()}</div>`
+      }
+      if (slot.decision === 'render') {
+        // 交真机裁决：图片用主机侧给的归一化路径（无需源码即可判 C4）
+        const key = registerBlockSource(type === 'image' ? (slot.imagePath || '') : (slot.source || ''), item.blockId)
+        if (type === 'image') {
+          imageCaptions.set(key, slot.imageCaption || '')
+          return `<figure class="kb-image" data-block-state="pending" data-block-key="${esc(key)}" data-block-id="${esc(item.blockId)}">${pendingPlaceholder()}</figure>`
+        }
+        if (type === 'mermaid') {
+          return `<div class="mermaid-src" data-block-state="pending" data-block-key="${esc(key)}" data-block-id="${esc(item.blockId)}">${pendingPlaceholder()}</div>`
+        }
+        if (type === 'chart') {
+          return `<div class="chart" data-block-state="pending" data-block-key="${esc(key)}" data-block-id="${esc(item.blockId)}">${pendingPlaceholder()}</div>`
+        }
+        return `<div class="gate-block" data-block-type="html" data-block-state="pending" data-block-key="${esc(key)}" data-block-id="${esc(item.blockId)}">${pendingPlaceholder()}</div>`
+      }
+      // 主机侧已判 degraded，或载荷异常：直接可读降级（绝不显示源码）
+      return degradeElement(type)
+    }).join('')
+  }
+
+  /**
+   * 收尾窗口（P7 v3.2）：`done` 到达后，门禁最多再等这么久让在飞的块结算；
+   * 到点未结算的块一律走降级终态。取值 `gate.answerWaitBudgetMs`（默认 600ms），
+   * 它是**窗口**而不是串行总配额——各块判定并行推进、互不占用。
+   */
+  function settleWindowMs() {
+    return typeof GATE_ANSWER_WAIT_BUDGET_MS === 'number' && GATE_ANSWER_WAIT_BUDGET_MS > 0
+      ? GATE_ANSWER_WAIT_BUDGET_MS
+      : 600
+  }
+
+  /**
+   * 块源码的内存台账（blockKey → 源码）。源码**只**存在这里，绝不写进 DOM 属性：
+   * V4 的证据形式是抓 `.bubble` 的 outerHTML，任何落在属性里的源码都会在快照里
+   * 命中"出现该块源码文本"这一判据。
+   */
+  const blockSources = new Map()
+
+  /**
+   * 本地扫描路径（无 block 事件时）的稳定键。
+   *
+   * 不能用扫描序号：正文每增长一行，同一个块的序号就可能变化，键一变，节点搬运
+   * （`paintStream`/`refreshBlockSlots`）就失配、块被重置。这里用「类型 + 源码摘要」
+   * 定键——同一块在任何帧都得到同一个键。
+   * @param type - 块类型
+   * @param source - 块体源码（图片块为站点路径）
+   * @param block - 块描述（当前未用，保留参数以便未来换用服务端 id）
+   * @returns 稳定键
+   */
+  function localGateKey(type, source, block) {
+    void block
+    return registerBlockSource(source, `${type}-${G.shortDigest(source)}`)
+  }
+
+  /**
+   * 登记块源码，返回可用于在 DOM 上指回它的键（键本身不含源码）。
+   *
+   * 键必须**稳定**：同一处块在每次重渲染时都要拿到同一个键，否则节点搬运
+   * （`paintStream`/`refreshBlockSlots` 靠 `data-block-key` 回填在飞节点）永远
+   * 匹配不上，块会被反复重置为 pending 并在重建中丢失；同时递增计数会让台账无限增长。
+   * @param source - 块体源码（或图片块的站点路径）
+   * @param stableId - 稳定标识（口径 B 用主机侧 blockId，本地扫描用序号）
+   * @returns 稳定键
+   */
+  function registerBlockSource(source, stableId) {
+    // 键必须是「稳定 id + 内容摘要」的复合键：只按 id 登记时，不同轮次如果拿到
+    // 相同 id（服务端早期 blockId 只含会话+序号，每轮从 0 重来），后登记的源码会
+    // 覆盖前一个 → 历史里每张图都渲染成同一张（实测故障）。带上内容摘要后，
+    // 内容不同的块永不互相覆盖；内容相同则天然复用同一份源码。
+    const digest = G.shortDigest(source || '')
+    const key = stableId === undefined || stableId === null || stableId === ''
+      ? `blk-${digest}`
+      : `blk-${stableId}-${digest}`
+    blockSources.set(key, source)
+    return key
+  }
+
+  /** 取回块源码（键不存在时返回空串，调用方按降级处理）。 */
+  function blockSourceOf(key) {
+    return typeof key === 'string' && blockSources.has(key) ? blockSources.get(key) : ''
+  }
+
+  /** 图片图注台账（同样只放内存，不放 DOM 属性）。 */
+  const imageCaptions = new Map()
+
+  /**
+   * 几何类失败回传服务端（O3）：只送类型/原因/摘要/字节数，**不含源码**；幂等去重
+   * 后 fire-and-forget，任何异常都吞掉——回传失败绝不影响访客已看到的内容。
+   * @param blockType - 四类块之一
+   * @param reason - O2 枚举内的原因
+   * @param source - 块源码（仅用于本地算摘要）
+   * @param blockId - 块 id（幂等键的一部分）
+   */
+  function reportGateFailure(blockType, reason, source, blockId) {
+    try {
+      const payload = G.buildReport({
+        sessionId: sessionId || '',
+        blockId: blockId || `anon-${gateTurnStart}`,
+        blockType,
+        reason,
+        source,
+        outcome: 'degraded',
+      })
+      if (!payload) return
+      if (!reportDeduper.shouldSend(payload.blockId, payload.sourceDigest)) return
+      fetch(`${API_BASE}${GATE_REPORT_PATH}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+        keepalive: true,
+      }).catch(() => { /* 离线/限流：留痕丢了就丢了，访客内容不受影响 */ })
+    } catch { /* 组装失败同样静默：回传永远不是访客能感知的路径 */ }
+  }
+
+  /**
+   * 真机渲染**成功**回传（F-4）。
+   *
+   * 此前只有失败回传，主机侧因此无法区分「真机真的把图渲染出来了」与「等待窗口
+   * 内没收到任何回传 ⇒ 按结构性结论记 passed」——`blockResults = 'passed'` 这两种
+   * 来源在留痕里完全一样，运维无法确认访客是否真的看到了图。本函数补齐成功路径。
+   *
+   * 与失败回传同口径：复用 `reportDeduper` 幂等（同块同摘要只发一次，避免每帧重
+   * 传）、fire-and-forget、任何异常都吞掉——回传永远不是访客能感知的路径。
+   * @param blockType - 四类块之一
+   * @param source - 块源码（图片块为站点路径；用于生成摘要与幂等键）
+   * @param blockId - 主机侧块 id（静态路径传本地派生 id）
+   */
+  function reportGatePassed(blockType, source, blockId) {
+    try {
+      const payload = G.buildReport({
+        sessionId: sessionId || '',
+        blockId: blockId || `anon-${gateTurnStart}`,
+        blockType,
+        reason: '',
+        source,
+        outcome: 'passed',
+      })
+      if (!payload) return
+      if (!reportDeduper.shouldSend(payload.blockId, payload.sourceDigest)) return
+      fetch(`${API_BASE}${GATE_REPORT_PATH}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+        keepalive: true,
+      }).catch(() => { /* 离线/限流：留痕丢了就丢了，访客内容不受影响 */ })
+    } catch { /* 组装失败同样静默：回传永远不是访客能感知的路径 */ }
+  }
+
+  /** 可读降级元素（D1/D2/REP3）：一句访客能读懂的话，不含源码与技术词。 */
+  function degradeText(blockType) {
+    const key = G.textKeyFor(G.GATE_STATES.degraded, blockType)
+    return t(key)
+  }
+
+  /** 降级元素标记：data-block-state 供真机 DOM 快照断言（V2/V3）。 */
+  function degradeElement(blockType) {
+    return `<div class="gate-degraded" data-block-state="degraded">${esc(degradeText(blockType))}</div>`
+  }
+
+  /**
+   * 静态渲染路径（历史恢复 / 非流式回答）的失败出口：既降级，又留痕。
+   * @param blockType - 四类块之一
+   * @param reason - O2 枚举内的原因
+   * @param source - 块源码
+   * @returns 降级元素 HTML
+   */
+  function evidenceHint(blockType, reason, source) {
+    reportGateFailure(blockType, reason, source, `static-${blockType}-${G.shortDigest(source)}`)
+    return degradeElement(blockType)
+  }
+
+  /**
+   * 把**已通过 C2 判据**的图表数据渲染成横向条形行。
+   *
+   * 判据（JSON 合法 / 非空数组 / 标签非空 / 数值有限非负）由 output-gate.js 的
+   * `checkChartData` 负责，在 `settleGatePlaceholders` 里调用；本函数是纯渲染，
+   * 不再持有任何降级分支——旧实现在这里把原始 JSON 当代码块贴进气泡（源码回退）。
+   * @param rows - `{ label, value }[]`（已判定合法）
+   * @returns 图表内部 HTML
+   */
+  function renderChartRows(rows) {
+    const max = Math.max(...rows.map(row => row.value), 1)
+    return rows.map(row => {
+      const pct = max > 0 ? Math.round(row.value / max * 100) : 0
+      return `<div class="bar-row"><span class="label">${esc(row.label)}</span><div class="bar" style="width:${Math.max(pct, 2)}%"></div><span>${row.value}</span></div>`
+    }).join('')
+  }
+
+  /** 判定期占位元素（P4/V2）：唯一允许在合格前出现的东西，文案取自 i18n。 */
+  function pendingPlaceholder() {
+    return `<span class="gate-pending"><span class="spinner-sm"></span>${esc(t(G.PENDING_KEY))}</span>`
   }
 
   // ── Mermaid 本地渲染（离线，浏览器端出图）─────────────────────────────
@@ -956,6 +1674,14 @@
   }
 
   let mermaidPromise = null
+  /**
+   * 本轮渲染器是否已加载失败（C8：失败后不再重试加载，避免每个图形块都重拉 3.4MB）。
+   *
+   * 重置粒度 = **每次新回答**（`send()` 开头清零），不是永久失败：资产是被临时
+   * 挪走/网络抖动时，下一轮应该有机会重新加载成功（实测「永久失败」会让一次
+   * 抖动影响整个会话）。同一轮内无论多少个 mermaid 块，都只尝试加载一次。
+   */
+  let mermaidLoadFailed = false
   let diagramSeq = 0
   let diagramObserver = null
 
@@ -1001,28 +1727,47 @@
   /** 懒加载 mermaid 库（同源相对路径，反代前缀自适应）；失败返回 null。 */
   function loadMermaid() {
     if (window.mermaid) return Promise.resolve(window.mermaid)
+    // 本轮已失败过：直接拒绝，**不**再插入脚本标签。否则「Promise 置回 null →
+    // 下一个块再试」会让单轮产生 N 次 404 请求风暴（实测 9 次请求 / 8 条控制台错误）。
+    if (mermaidLoadFailed) {
+      return Promise.reject(new Error('mermaid load failed earlier this turn'))
+    }
     if (mermaidPromise) return mermaidPromise
     mermaidPromise = new Promise((resolve, reject) => {
       const script = document.createElement('script')
       script.src = MERMAID_ASSET
       script.onload = () => {
-        if (!window.mermaid) { mermaidPromise = null; reject(new Error('mermaid not exposed')); return }
+        if (!window.mermaid) {
+          mermaidLoadFailed = true
+          mermaidPromise = null
+          reject(new Error('mermaid not exposed'))
+          return
+        }
         // startOnLoad:false —— 由 renderDiagrams 精确控制渲染时机；
         // securityLevel:strict —— 模型输出一律当不可信内容，标签走净化。
         window.mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', ...MERMAID_THEME })
         resolve(window.mermaid)
       }
-      script.onerror = () => { mermaidPromise = null; reject(new Error('mermaid load failed')) }
+      script.onerror = () => {
+        // 记住失败（本轮不再重试），并把已插入的 script 摘掉，避免残留
+        mermaidLoadFailed = true
+        mermaidPromise = null
+        if (script.parentNode) script.parentNode.removeChild(script)
+        reject(new Error('mermaid load failed'))
+      }
       document.head.appendChild(script)
     })
     return mermaidPromise
   }
 
   /**
-   * 把 root 内还没渲染的 mermaid 块转成 SVG。渲染结果会按源码缓存（见
-   * svgCacheGet/Put）：刷新时命中缓存就直接贴回 SVG，既不再加载 3.5MB 的库，
-   * 也不重新解析布局。流式回答期间保持代码块（避免每个 delta 重排图），只在
-   * 回答定稿（done / 断流恢复）时立即渲染；恢复历史时只渲染进入视口的图。
+   * 把 root 内还没渲染的 mermaid 块转成 SVG。渲染结果按源码缓存（见
+   * svgCacheGet/Put）：刷新时命中缓存直接贴回 SVG，既不再加载 3.5MB 的库，也不
+   * 重新解析布局。流式回答期间保持占位（避免每个 delta 重排图），只在回答定稿
+   * （done / 断流恢复）时渲染；恢复历史时只渲染进入视口的图。
+   *
+   * 门禁（P3/P5/P6）：节点状态走 `pending → loading → validating → passed/degraded`，
+   * 超时或任一判据失败一律降级为可读文案——**容器里永远不会出现源码**。
    * @param root - 待渲染的容器
    * @param options.lazy - true 时（历史恢复）交给 IntersectionObserver 按需渲染
    */
@@ -1032,13 +1777,14 @@
     if (nodes.length === 0) return
     const misses = []
     for (const node of nodes) {
-      const source = node.getAttribute('data-src') || ''
+      const source = blockSourceOf(node.dataset.blockKey)
       const cached = svgCacheGet(source)
       if (cached !== null) {
-        // 已经渲染过的图：直接复用，无需库、无需重新布局
         node.setAttribute('data-rendered', '1')
+        node.dataset.blockState = 'passed'
         node.innerHTML = cached
         node.classList.add('mermaid-done')
+        reportGatePassed('mermaid', source, node.dataset.blockId || node.dataset.blockKey || '')
       } else {
         misses.push(node)
       }
@@ -1063,24 +1809,163 @@
     }
   }
 
-  /** 真正调用 mermaid 渲染这些节点，并把结果写入缓存。 */
-  async function renderMermaidNodes(nodes) {
-    let lib
-    try { lib = await loadMermaid() } catch { return /* 库拿不到：保留代码块 */ }
-    for (const node of nodes) {
-      if (node.classList.contains('mermaid-done')) continue
-      const source = node.getAttribute('data-src') || ''
+  /**
+   * 把一个 mermaid 节点推进到终态（P5/P6）。
+   * 状态推进与判据都在这里：`pending → loading`（等库）→ `validating`（真机渲染 +
+   * 几何判据）→ `passed`；任何一步失败/超时/违反预算都落到 `degraded`，且**不
+   * 保留任何源码**。
+   * @param node - `.mermaid-src` 容器
+   * @param lib - 已就绪的 mermaid 实例（null 表示库不可用）
+   */
+  async function advanceMermaidNode(node, lib) {
+    if (node.dataset.blockState === 'passed' || node.dataset.blockState === 'degraded') return
+    const source = blockSourceOf(node.dataset.blockKey)
+    const blockId = `mmd-${++diagramSeq}`
+    const fail = reason => {
+      node.dataset.blockState = G.GATE_STATES.degraded
+      node.innerHTML = degradeElement('mermaid')
+      reportGateFailure('mermaid', reason, source, blockId)
+    }
+    if (lib === null) { fail(G.GATE_REASONS.libraryUnavailable); return }
+    // P7（v3.2 并行语义）：各块判定并行推进，只用单块上限 gate.blockTimeoutMs，
+    // 不用「整条回答总配额」——串行配额会让第 2 块因前一块耗时而必然被降级。
+    node.dataset.blockState = G.GATE_STATES.validating
+    const started = Date.now()
+    let verdict
+    let svg = null
+    try {
+      const outcome = await withTimeout(lib.render(`dsh-mmd-${blockId}`, source), GATE_BLOCK_TIMEOUT_MS)
+      svg = outcome && typeof outcome.svg === 'string' ? outcome.svg : null
+      const metrics = svg === null ? null : measureSvg(svg)
+      if (metrics === null) verdict = { ok: false, reason: G.GATE_REASONS.renderEmpty }
+      else verdict = G.checkRendered('mermaid', metrics, { maxAspectRatio: G.DEFAULT_MAX_ASPECT_RATIO })
+    } catch (error) {
+      // 超时与语法错误都归入 parse-error / timeout（O2 枚举内），二者对访客等价
+      verdict = { ok: false, reason: error && error.gateTimeout ? G.GATE_REASONS.timeout : G.GATE_REASONS.parseError }
+    }
+    void started
+    if (!verdict.ok || svg === null) { fail(verdict.reason || G.GATE_REASONS.renderEmpty); return }
+    settledGates.add(node.dataset.blockKey || '')
+    node.dataset.blockState = G.GATE_STATES.passed
+    node.innerHTML = svg
+    node.classList.add('mermaid-done')
+    svgCachePut(source, svg)
+    reportGatePassed('mermaid', source, node.dataset.blockId || node.dataset.blockKey || '')
+  }
+
+  /**
+   * 真机测量一段 SVG 的几何（C1/C5 判据的输入）。
+   * 解析后挂到离屏容器里量 bbox——只有真机布局才给得出真实几何。
+   * @param svg - 渲染产出的 SVG 字符串
+   * @returns 判据输入；无法解析时返回 null
+   */
+  function measureSvg(svg) {
+    try {
+      const box = document.createElement('div')
+      box.style.cssText = 'position:absolute;left:-99999px;top:0;width:1200px;visibility:hidden'
+      box.innerHTML = svg
+      document.body.appendChild(box)
       try {
-        const { svg } = await lib.render(`dsh-mmd-${++diagramSeq}`, source)
-        node.innerHTML = svg
-        node.classList.add('mermaid-done')
-        svgCachePut(source, svg)
-      } catch (err) {
-        // 语法错误 / 渲染异常：保留原始代码块，控制台留证据
-        console.warn('[guest] mermaid 渲染失败，保留代码块：', err && err.message)
+        const el = box.querySelector('svg')
+        if (!el) return null
+        const rect = el.getBoundingClientRect()
+        const geometryTags = ['path', 'rect', 'circle', 'ellipse', 'polygon', 'polyline', 'line', 'text', 'foreignObject']
+        const childCount = el.querySelectorAll(geometryTags.join(',')).length
+        return {
+          childNodeCount: childCount,
+          hasGeometry: childCount > 0,
+          viewBox: el.getAttribute('viewBox'),
+          width: Number(el.getAttribute('width')) || rect.width,
+          height: Number(el.getAttribute('height')) || rect.height,
+          bboxWidth: rect.width,
+          bboxHeight: rect.height,
+        }
+      } finally { box.remove() }
+    } catch { return null }
+  }
+
+  /**
+   * 给一个 Promise 套上超时（`G.blockTimeoutMs`）。超时会标记 `gateTimeout`，
+   * 让调用方把 reason 归到 `timeout` 而不是 `parse-error`。
+   * @param promise - 待等待的 Promise
+   * @param ms - 最长等待毫秒
+   * @returns 原 Promise 的解析值；超时则 reject
+   */
+  function withTimeout(promise, ms) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        const error = new Error('gate timeout')
+        error.gateTimeout = true
+        reject(error)
+      }, ms)
+      Promise.resolve(promise).then(
+        value => { clearTimeout(timer); resolve(value) },
+        error => { clearTimeout(timer); reject(error) },
+      )
+    })
+  }
+
+  /**
+   * 真正调用 mermaid 渲染这些节点。
+   * 库不可用时不重试加载（C8：避免每次回答重复拉 3.4MB），直接把该批块降级。
+   * @param nodes - 待渲染的 `.mermaid-src` 容器
+   */
+  async function renderMermaidNodes(nodes) {
+    const pending = nodes.filter(node => !node.classList.contains('mermaid-done'))
+    if (pending.length === 0) return
+    for (const node of pending) node.dataset.blockState = G.GATE_STATES.loading
+    let lib = null
+    try {
+      lib = await withTimeout(loadMermaid(), GATE_LIBRARY_LOAD_TIMEOUT_MS)
+    } catch { lib = null /* 库缺失/超时：该类型块一律降级，不重试加载 */ }
+    for (const node of pending) await advanceMermaidNode(node, lib)
+  }
+
+  /**
+   * 断流/离开页面时把仍在判定期或尚未渲染的块按 P6/P9 降级。
+   * 已 `passed` 的块保持显示，不回改（REP5）。
+   * @param root - 容器（默认整个聊天区）
+   */
+  function degradePendingGates(root) {
+    const scope = root || chatEl
+    if (!scope) return
+    for (const node of scope.querySelectorAll('.mermaid-src')) {
+      const state = node.dataset.blockState
+      if (state === G.GATE_STATES.passed || state === G.GATE_STATES.degraded
+        || node.classList.contains('mermaid-done')) continue
+      node.dataset.blockState = G.GATE_STATES.degraded
+      node.innerHTML = degradeElement('mermaid')
+      reportGateFailure('mermaid', G.GATE_REASONS.timeout, blockSourceOf(node.dataset.blockKey), `stale-${node.dataset.blockKey || 'anon'}`)
+    }
+    // 图片：必须覆盖 `validating`（真机 decode 跨网络，很可能在本窗口内未回来）。
+    // 只匹配 `pending` 会漏掉它——实测该漏判让「done → 结算」拖到 672ms，越过 600ms 预算。
+    for (const node of scope.querySelectorAll('.kb-image')) {
+      const state = node.dataset.blockState
+      if (state === G.GATE_STATES.passed || state === G.GATE_STATES.degraded) continue
+      node.dataset.blockState = G.GATE_STATES.degraded
+      const key = node.dataset.blockKey || ''
+      node.innerHTML = degradeElement('image')
+      const caption = imageCaptions.get(key)
+      // REP3①：图注是语义等价正文，降级时保留
+      if (caption) {
+        const cap = document.createElement('figcaption')
+        cap.textContent = caption
+        node.appendChild(cap)
       }
+      reportGateFailure('image', G.GATE_REASONS.timeout, blockSourceOf(key), `stale-${key || 'anon'}`)
+    }
+    // 预裁决占位（block-open 后一直没等到 block，或本地扫描未结算）：
+    // 到窗口仍未终态一律按**自己的类型**降级——不能一律落到 html 键，那会让
+    // mermaid 块显示「这部分内容暂时无法显示」而不是示意图/D3 对应文案。
+    for (const node of scope.querySelectorAll('.gate-block, .chart')) {
+      const state = node.dataset.blockState
+      if (state === G.GATE_STATES.passed || state === G.GATE_STATES.degraded) continue
+      const type = node.dataset.blockType || (node.classList.contains('chart') ? 'chart' : 'html')
+      node.dataset.blockState = G.GATE_STATES.degraded
+      node.innerHTML = degradeElement(type)
     }
   }
+
 
   // ── 图片阅读器（点击图片/图表放大查看）───────────────────────────────
   // 沿用团队既有实现（Readmdvue 浏览器插件 image-modal）：深色毛玻璃底 + 克隆
@@ -1382,12 +2267,25 @@
       setStatus('online')
       for (const m of messages) {
         if (m.role === 'assistant') {
-          addMessage('assistant', renderMarkdown(m.text))
+          const host = addMessage('assistant', renderMarkdown(m.text))
+          // 历史重放也要吃下 `blocks`：服务端 /history 一直带着它（含 sourceB64 与
+          // 终态 decision），但旧实现只用了 `m.text`，导致刷新/重开后图形块整体消失
+          // （当轮送达正常、唯独重放丢块）。这里按条复位台账后复用与 `done` 帧
+          // 完全相同的 `adoptDoneBlocks` + `refreshBlockSlots`，保证「历史重放与
+          // 当轮送达同一判定」（E4），不新增第二套渲染路径。
+          blockSlots.clear()
+          blockOrder.length = 0
+          sawBlockEvent = true
+          if (Array.isArray(m.blocks) && m.blocks.length > 0) {
+            adoptDoneBlocks(m)
+            refreshBlockSlots(host.querySelector('.bubble'))
+          }
         } else {
           addMessage('user', renderMarkdown(m.text))
         }
       }
-      renderDiagrams(chatEl, { lazy: true })
+      // 历史重放：与当轮送达同一判定（E4）——图形块一律先占位，再在真机判定
+      await finalizeHistoryGates(chatEl)
     } catch { /* offline / server restarted: keep session id, chat will resume it */ }
     finally {
       // addMessage removes welcome; if nothing was restored, show the
@@ -1406,7 +2304,7 @@
    * races a 30s timer; a stall throws and send() recovers the persisted reply
    * from history.
    * @param res - fetch Response whose body is an SSE stream.
-   * @param onEvent - per-frame handler `(event, data)`.
+   * @param onEvent - per-frame handler `(event, data)`, awaited so frame order holds.
    */
   async function consumeSse(res, onEvent) {
     if (!res.body) throw new Error('no stream body')
@@ -1451,7 +2349,8 @@
         if (data) {
           let parsed
           try { parsed = JSON.parse(data) } catch { parsed = { raw: data } }
-          onEvent(event, parsed)
+          // 逐个 await：事件顺序必须与到达顺序一致（sources 要先于 done 生效）
+          await onEvent(event, parsed)
         }
       }
     }
@@ -1495,11 +2394,354 @@
     return null
   }
 
+  /**
+   * 流式渲染入口：正文照常逐字上屏，受控图形块换成判定期占位。
+   *
+   * 流式期唯一允许出现的图形块形态就是 `data-block-state="pending"` 占位（P4/V1/V2）
+   * ——旧实现把半截围栏当代码块贴出来，访客在第 38 个 delta 就看到了源码。真机
+   * 校验与渲染不在这里做（那是 `renderDiagrams` 在 `done` 之后的职责）。
+   *
+   * 未闭合的块同样只出占位：`renderMarkdown` 的围栏分支对「已闭合」与「未闭合」
+   * 都产出 `data-block-state="pending"`，块体源码只进内存台账，不进 DOM。
+   * @param src - 到本帧为止累积的回答正文
+   * @param options.final - true 表示回答已定稿（本地已有 reply），未闭合块也须占位
+   * @returns 可直接写入 `bubble.innerHTML` 的 HTML
+   */
+  function renderStreamMarkdown(src, options = {}) {
+    void options
+    // 图形块的占位由 renderMarkdown 的围栏分支统一产出（单一实现）。
+    // 返回值只含占位；块一旦闭合，`startClosedGates` 会立刻开判。
+    return renderMarkdown(src)
+  }
+
+  /**
+   * 启动「已闭合但尚未开判」的图形块（P5：块闭合后即进入 validating）。
+   *
+   * 为什么必须在流式期就启动、而不能全堆到 `done`：实测单轮首帧 11.03s、`done`
+   * 19.14s，块闭合后仍有 **6.6s** 生成窗口。把判定推迟到 `done`，等于把这 6.6s
+   * 白扔，让 mermaid 渲染与图片 `decode()` 全部挤进 `done` 后 600ms 的收尾窗口——
+   * 图片判据跨网络，几乎必然被降级（CF-1 要消灭的正是这种"本来能显示的图变成
+   * 文字"）。在这里开判，收尾窗口才只是安全网。
+   *
+   * 不 await：文字打字机不受影响；各块状态机（`pending` 才处理、进入终态即跳过）
+   * 保证同一块只被启动一次（P8/REP5）。
+   * @param root - 气泡容器
+   */
+  function startClosedGates(root) {
+    if (!root) return
+    try {
+      settleGatePlaceholders(root)
+    } catch { /* 门禁启动异常不得影响文字上屏（C8） */ }
+  }
+
+  /**
+   * 把流式 HTML 写进气泡，同时**保住已结算的图形块**。
+   *
+   * 打字机每帧都要重渲染整段正文（`innerHTML` 赋值），这会顺手把还没回图的
+   * `<img>`、正在渲染的 mermaid 容器一起销毁——本块已经用掉的生成窗口白费，
+   * 图片请求被反复重启，`done` 时又从头开判（实测：图片直到 done+9ms 才进入
+   * validating，而它早在 1.2s 就该开始）。这里在重渲染前后搬运终态元素：
+   * 状态与元素本身都保留（同一个 `<img>` 节点重新挂载不会取消已发出的请求）。
+   * @param root - 气泡容器
+   * @param html - 本帧的完整 HTML
+   */
+  function paintStream(root, html) {
+    if (!root) return
+    // 1) 摘下已进入 validating/passed/degraded 的块**真节点**（pending 占位无状态可保）。
+    //    必须是真节点而非 clone：`<img>` 的请求与 load/error 监听都挂在节点上，
+    //    clone 会造出一个新元素——在飞的请求与其回调一起丢失，块等于从头再判一次。
+    const carried = new Map()
+    for (const node of root.querySelectorAll('[data-block-key]')) {
+      const state = node.dataset.blockState
+      if (state === G.GATE_STATES.pending || !state) continue
+      carried.set(node.dataset.blockKey, node)
+    }
+    // 口径 B 的块槽位容器必须整体搬走：它由 block 事件驱动，不能被正文重渲染抹掉。
+    // 直接复用**同一个节点**（先摘下来，稍后挂回）——`cloneNode(false)` + 移动子节点
+    // 会丢掉 `:scope > .gate-blocks` 的定位假设，且在 done 重渲染时让已 passed 的块
+    // 凭空消失（实测 kb-image:passed 在 done 帧后不见了）。
+    const carriedHost = root.querySelector(':scope > .gate-blocks')
+    if (carriedHost) carriedHost.remove()
+    root.innerHTML = html
+    // 2) 用真节点替换同名占位：请求不取消、监听不丢、状态延续（REP5 不回改已上屏内容）
+    for (const placeholder of root.querySelectorAll('[data-block-key]')) {
+      const live = carried.get(placeholder.dataset.blockKey)
+      if (!live) continue
+      placeholder.replaceWith(live)
+    }
+    // 3) 恢复块槽位容器（内容原样，含在飞节点）
+    if (carriedHost) {
+      root.appendChild(carriedHost)
+    } else if (blockOrder.length > 0) {
+      // 正文重渲染把 host 抹掉（例如 block 事件先到、delta 后到）：重建并渲染槽位
+      refreshBlockSlots(root)
+    }
+  }
+
+  /**
+   * 四类图形块的唯一入口：产出「占位」或「立即终态」元素。
+   *
+   * 为什么要有这一层：只走这条路径，才能保证没有任何图形块能绕过判据直接渲染
+   * （旧实现里 `renderImageBlock` 会立刻写 `<img src>`，图片请求先于任何判定发出）。
+   * mermaid 需要真机渲染与几何判据，统一留给 `done` 之后的 renderDiagrams；chart /
+   * image / html 的判据是同步或单事件可达的，这里当场给结论。
+   * @param type - 四类块之一（已规范化）
+   * @param info - 围栏语言后的附加关键字（如 mindmap）
+   * @param raw - 块体源码
+   * @returns 元素 HTML
+   */
+  function gateBlockHtml(type, info, raw) {
+    return gatePlaceholderHtml({
+      blockId: `inline-${G.shortDigest(raw)}`,
+      blockType: type,
+      info,
+      lines: raw.split('\n'),
+      closed: true,
+    })
+  }
+
+  /**
+   * 为一个受控块产出占位/终态元素。
+   * 已闭合的块可以就地判定（mermaid 渲染要等 `done` 之后的 `renderDiagrams`，其余
+   * 三类判据是同步的，当场就能给结论）；未闭合的块只有占位。
+   * @param block - 块描述 `{ blockType, info, lines, closed }`
+   * @returns 元素 HTML
+   */
+  function gatePlaceholderHtml(block) {
+    const type = block.blockType
+    const source = block.lines.join('\n')
+    if (!block.closed) {
+      return `<div class="gate-block" data-block-type="${esc(type)}" data-block-state="pending">${pendingPlaceholder()}</div>`
+    }
+    if (type === 'mermaid') {
+      const head = source.trimStart()
+      const src = block.info && !head.startsWith(block.info) ? `${block.info}\n${source}` : source
+      return `<div class="mermaid-src" data-block-state="pending" data-block-key="${esc(localGateKey('mermaid', src, block))}">${pendingPlaceholder()}</div>`
+    }
+    if (type === 'chart') {
+      // 判据是同步的，但渲染仍统一延到结算阶段，保证「占位 → 终态」只发生一次（REP2/REP5）
+      const key = localGateKey('chart', source, block)
+      return `<div class="chart" data-block-state="pending" data-block-key="${esc(key)}">${pendingPlaceholder()}</div>`
+    }
+    if (type === 'image') {
+      const first = (block.lines[0] || '').trim().replace(/^`+|`+$/g, '')
+      if (!G.checkImagePath(first).ok) return evidenceHint('image', 'image-path-invalid', source)
+      const caption = block.lines.slice(1).join(' ').trim()
+      // 真机取图要等解码判据（naturalWidth）阶段才发起（C4/IMG2）；路径与图注放
+      // 内存台账，DOM 上只留短键
+      const key = localGateKey('image', first, block)
+      imageCaptions.set(key, caption)
+      return `<figure class="kb-image" data-block-state="pending" data-block-key="${esc(key)}">${pendingPlaceholder()}</figure>`
+    }
+    const checked = G.checkHtmlBlock(source, GATE_MAX_BLOCK_BYTES)
+    if (!checked.ok) return evidenceHint('html', checked.reason, source)
+    return `<div class="gate-block" data-block-type="html" data-block-state="pending" data-block-key="${esc(localGateKey('html', source, block))}">${pendingPlaceholder()}</div>`
+  }
+
+  /**
+   * 把已上屏的占位推进到终态（`done` / 断流恢复之后调用）。
+   * 三类同步判据当场给结论；html 交给沙箱回传高度后再判定；图片靠真机解码
+   * （naturalWidth>0，C4）——布局尺寸恒有效，不可作判据。
+   * @param root - 气泡容器
+   */
+  function settleGatePlaceholders(root) {
+    if (!root) return
+    // chart：同步判据，通过则渲染为条形图；不通过则可读降级（C2/D3）
+    for (const node of [...root.querySelectorAll('.chart[data-block-state="pending"]')]) {
+      const source = blockSourceOf(node.dataset.blockKey)
+      const checked = G.checkChartData(source)
+      settledGates.add(node.dataset.blockKey || '')
+      if (!checked.ok) {
+        node.dataset.blockState = G.GATE_STATES.degraded
+        node.innerHTML = degradeElement('chart')
+        reportGateFailure('chart', checked.reason, source, `chart-${G.shortDigest(source)}`)
+        continue
+      }
+      node.dataset.blockState = G.GATE_STATES.passed
+      node.innerHTML = renderChartRows(checked.rows)
+      reportGatePassed('chart', source, node.dataset.blockId || node.dataset.blockKey || '')
+    }
+    // html：同步判据（非空白 + 字节上限），通过才建沙箱 iframe（C3）。
+    // 只处理 html 类型的占位：`.gate-block` 也是「预裁决占位」的通用类名，
+    // 若不按 data-block-type 过滤，mermaid 的预占位会被这里用 html 降级文案判掉
+    // （实测：块显示「这部分内容暂时无法显示」而不是示意图文案）。
+    for (const node of [...root.querySelectorAll('.gate-block')]) {
+      if (node.dataset.blockState !== 'pending') continue
+      const nodeType = node.dataset.blockType || 'html'
+      if (nodeType !== 'html') continue
+      const source = blockSourceOf(node.dataset.blockKey)
+      const checked = G.checkHtmlBlock(source, GATE_MAX_BLOCK_BYTES)
+      settledGates.add(node.dataset.blockKey || '')
+      if (!checked.ok) {
+        node.dataset.blockState = G.GATE_STATES.degraded
+        node.innerHTML = degradeElement('html')
+        reportGateFailure('html', checked.reason, source, `html-${G.shortDigest(source)}`)
+        continue
+      }
+      node.dataset.blockState = G.GATE_STATES.passed
+      node.innerHTML = renderHtmlBlock(source)
+      reportGatePassed('html', source, node.dataset.blockId || node.dataset.blockKey || '')
+    }
+    settleGateImages(root)
+    settleGateMermaid(root)
+  }
+
+  /** 图片占位 → 真机解码判据（C4）：naturalWidth>0 才算通过，否则降级。 */
+  function settleGateImages(root) {
+    for (const figure of [...root.querySelectorAll('.kb-image[data-block-state="pending"]')]) {
+      const key = figure.dataset.blockKey || ''
+      const path = blockSourceOf(key)
+      const caption = imageCaptions.get(key) || ''
+      const src = G.toImageSrc(path, API_BASE)
+      if (src === null) {
+        figure.dataset.blockState = G.GATE_STATES.degraded
+        figure.innerHTML = degradeElement('image')
+        reportGateFailure('image', 'image-path-invalid', path, `img-${G.shortDigest(path)}`)
+        continue
+      }
+      figure.dataset.blockState = G.GATE_STATES.validating
+      const img = document.createElement('img')
+      // 布局尺寸只用于预留空间；判据一律走 naturalWidth（C4）
+      img.width = 1000
+      img.height = 560
+      img.alt = caption
+      img.decoding = 'async'
+
+      const finish = ok => {
+        if (figure.dataset.blockState !== G.GATE_STATES.validating) return
+        settledGates.add(key)
+        if (ok) {
+          figure.dataset.blockState = G.GATE_STATES.passed
+          reportGatePassed('image', path, figure.dataset.blockId || key || '')
+          return
+        }
+        figure.dataset.blockState = G.GATE_STATES.degraded
+        // REP3①：图注是语义等价的正文，降级时保留它，只去掉图形本身
+        figure.innerHTML = degradeElement('image')
+        if (caption) {
+          const cap = document.createElement('figcaption')
+          cap.textContent = caption
+          figure.appendChild(cap)
+        }
+        reportGateFailure('image', 'image-decode-failed', path, `img-${G.shortDigest(path)}`)
+      }
+
+      /**
+       * 真机判据入口（C4）：优先 `decode()`（它把「解码失败」与「尚未解码」分开），
+       * 拿不到 decode 就退回 load 事件后的 naturalWidth。两者都以 `naturalWidth>0`
+       * 为通过条件，**绝不用布局尺寸**。
+       */
+      const judge = async () => {
+        try {
+          if (typeof img.decode === 'function') await img.decode()
+        } catch { /* 解码失败：交给下面的判据统一降级 */ }
+        if (figure.dataset.blockState !== G.GATE_STATES.validating) return
+        const verdict = G.checkRendered('image',
+          { naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight }, {})
+        finish(verdict.ok)
+      }
+      // 监听必须先于 `src` 赋值注册：图片命中 HTTP 缓存时，load/error 可能在赋值的
+      // 同一个任务里就已派发，后注册的监听会永久错过（占位一直转到超时才降级）。
+      img.addEventListener('load', () => { void judge() })
+      img.addEventListener('error', () => finish(false))
+      // 超时兜底（单块上限，与其它块并行）：到点仍无自然尺寸就降级，避免占位无限旋转
+      setTimeout(() => { if (img.naturalWidth === 0) finish(false) }, GATE_BLOCK_TIMEOUT_MS)
+
+      figure.innerHTML = ''
+      figure.appendChild(img)
+      if (caption) {
+        const cap = document.createElement('figcaption')
+        cap.textContent = caption
+        figure.appendChild(cap)
+      }
+      img.src = src
+    }
+  }
+
+  /** mermaid 占位：交给既有渲染链路（懒加载库 + 几何判据），这里只标记已入队。 */
+  function settleGateMermaid(root) {
+    renderDiagrams(root)
+  }
+
+  /**
+   * 本轮是否还有块停在判定期（未进入 passed/degraded 终态）。
+   * @param root - 气泡容器
+   * @returns 存在未结算块返回 true
+   */
+  function hasUnsettledGates(root) {
+    if (!root) return false
+    for (const node of root.querySelectorAll('[data-block-state]')) {
+      const state = node.dataset.blockState
+      if (state !== G.GATE_STATES.passed && state !== G.GATE_STATES.degraded) return true
+    }
+    return false
+  }
+
+  /**
+   * `done` 前的收尾窗口（P7 v3.2）：并行等待在飞的块结算，最多 `answerWaitBudgetMs`，
+   * 到点仍**未结算的块一律降级**为可读文案。
+   *
+   * 两条硬约束：① **不得阻塞 `done`**——本函数只在 `done` 事件到达前的极短窗口内轮询，
+   * 超窗口立即返回；② 该窗口是**等待上限**而非串行配额，各块判定始终并行推进。
+   * @param root - 气泡容器
+   */
+  async function awaitGateSettlement(root, windowStart) {
+    // 窗口必须从 **`done` 帧到达** 起算，而不是从本函数进入时起算：done 处理里先做了
+    // 整条正文重渲染与 sources 渲染（实测 ~12ms），若从进入时算，总耗时会变成
+    // 「窗口 600ms + 前置耗时」= 614ms，越过 T1 的 600ms 预算。
+    const origin = Number.isFinite(windowStart) ? windowStart : Date.now()
+    // 留出降级收尾余量：窗口到点后还要执行 degradePendingGates（改写 DOM、回传载荷），
+    // 实测这部分约 5~10ms。若把窗口用满 600ms，总耗时会到 606ms 越过预算，因此窗口
+    // 本身取 budget − margin，保证「done → 全部结算」整体 ≤ budget。
+    const SETTLE_MARGIN_MS = 30
+    const deadline = origin + Math.max(0, settleWindowMs() - SETTLE_MARGIN_MS)
+    // 轮询步长必须**收敛到 deadline**：固定 20ms 会让最后一次等待越过窗口
+    // （实测 600ms 窗口下总延迟 619ms）。这里取「剩余时间」与 20ms 的较小值，
+    // 保证窗口用满但不越界。
+    while (hasUnsettledGates(root)) {
+      const remaining = deadline - Date.now()
+      if (remaining <= 0) break
+      await new Promise(resolve => setTimeout(resolve, Math.min(20, remaining)))
+    }
+    // 窗口耗尽：未结算的块按 P6/P7 降级（degradePendingGates 会跳过已终态的块）
+    degradePendingGates(root)
+  }
+
+  /**
+   * 把一个气泡里的图形块推进到终态并渲染。
+   * 定稿入口统一走这里，保证「占位 → 终态」只发生一次（REP5：已上屏内容不回改）。
+   * @param root - 气泡容器
+   */
+  async function finalizeBubble(root) {
+    settleGatePlaceholders(root)
+  }
+
+  /**
+   * 历史恢复路径的图形块定稿：与实时回答走同一套判据（E4：刷新不得改变判定）。
+   * 历史里的块按视口懒渲染（mermaid 交给 IntersectionObserver），避免刷新时一次性
+   * 解析多张大图把首屏拖住。
+   * @param root - 聊天区容器
+   */
+  async function finalizeHistoryGates(root) {
+    settleGatePlaceholders(root)
+    await renderDiagrams(root, { lazy: true })
+  }
+
   async function send() {
     const text = inputEl.value.trim()
     if (!text) return
     inputEl.value = ''
     addMessage('user', renderMarkdown(text))
+    // 新一轮回答：重置门禁计时与回传去重（P7 的「整条回答预算」按轮计算）
+    gateTurnStart = Date.now()
+    settledGates.clear()
+    reportDeduper.reset()
+    // 口径 B 台账与块来源按轮隔离
+    blockSlots.clear()
+    blockOrder.length = 0
+    sawBlockEvent = false
+    // 渲染器加载失败状态按轮重置（见 mermaidLoadFailed 注释：不永久失败）
+    mermaidLoadFailed = false
     // 流式消息气泡：先显示"正在查询"动画，收到首个内容后替换为回答
     const bubbleHost = document.createElement('div')
     bubbleHost.className = 'msg assistant'
@@ -1522,7 +2764,7 @@
     let streamError = null
     /** Replace the waiting indicator with real content on the first delta. */
     function showStreamed() {
-      bubble.innerHTML = renderMarkdown(streamed)
+      bubble.innerHTML = renderStreamMarkdown(streamed)
       chatEl.scrollTop = chatEl.scrollHeight
     }
     try {
@@ -1550,10 +2792,14 @@
         // (e.g. the calm-down notice); prefer it over the raw error code.
         throw new Error(errData.message || errData.error || `request failed (${res.status})`)
       }
-      await consumeSse(res, (event, data) => {
-        if (event === 'meta' && typeof data.version === 'string') {
-          // Handshake frame: stamp the server build onto the badge.
-          if (svcVerEl) svcVerEl.textContent = `前端 ${APP_VERSION} · 服务 ${data.version}`
+      await consumeSse(res, async (event, data) => {
+        if (event === 'meta') {
+          if (typeof data.version === 'string' && svcVerEl) {
+            // Handshake frame: stamp the server build onto the badge.
+            svcVerEl.textContent = `前端 ${APP_VERSION} · 服务 ${data.version}`
+          }
+          // 服务端下发的门禁预算（§12）：单点可调，前端不硬编码
+          if (data.gate) applyGateConfig(data.gate)
         } else if (event === 'notice' && typeof data.text === 'string') {
           // Friendly reminder from the moderation layer (first-offence
           // warning): shown above the reply, never blocks the answer.
@@ -1564,21 +2810,43 @@
           tipBubble.textContent = data.text
           tip.appendChild(tipBubble)
           chatEl.insertBefore(tip, bubbleHost)
+        } else if (event === 'block-open' && typeof data.blockId === 'string') {
+          // 口径 B：主机侧已把图形块从文字流中摘出，这里只出占位——源码尚未下发，
+          // 也不允许从任何地方推断它（P4/V1）。
+          sawBlockEvent = true
+          blockOrder.push({ blockId: data.blockId, blockType: G.normalizeBlockType(data.blockType) || 'html' })
+          blockSlots.set(data.blockId, { blockId: data.blockId, blockType: G.normalizeBlockType(data.blockType) || 'html', source: '', imagePath: '', imageCaption: '', reason: '' })
+          refreshBlockSlots(bubble)
+        } else if (event === 'block' && data.blockId) {
+          // 主机侧裁决结果：`render` 交真机，`degraded` 直接落可读文案（两态都不带围栏源码）
+          const decoded = G.decodeBlockPayload(data)
+          applyBlockPayload(decoded, data)
+          const host = refreshBlockSlots(bubble)
+          // P5：块一到就开判，用掉生成窗口
+          startClosedGates(host)
         } else if (event === 'delta' && typeof data.text === 'string') {
           const first = streamed === ''
           streamed += data.text
           if (first) showStreamed()
           else {
-            bubble.innerHTML = renderMarkdown(streamed)
+            paintStream(bubble, renderStreamMarkdown(streamed))
             chatEl.scrollTop = chatEl.scrollHeight
           }
+          // P5：块一闭合就开判，用掉生成窗口；已结算/已启动的块由状态机跳过
+          startClosedGates(bubble)
         } else if (event === 'sources' && Array.isArray(data.sources)) {
           sources = data.sources
         } else if (event === 'done') {
           done = true
+          // T1 预算起点：done 帧到达的那一刻（窗口不得把本帧前置渲染耗时算进去）
+          doneFrameAt = Date.now()
+          // done 是权威终态：以 blocks/blockResults/degradedIds 为准补齐/纠正本地槽位
+          if (Array.isArray(data.blocks)) adoptDoneBlocks(data)
           if (typeof data.reply === 'string' && data.reply) {
             streamed = data.reply
-            showStreamed()
+            // 定稿帧带完整正文：未闭合的块也按占位呈现，绝不露出源码（P4/P6）。
+            // 同样用 paintStream：不得让定稿重渲染把在飞的块状态清掉。
+            paintStream(bubble, renderStreamMarkdown(streamed, { final: true }))
           }
           sources = data.sources || sources
           if (sources.length) {
@@ -1587,13 +2855,26 @@
             src.innerHTML = sources.map(s => `<span>📄 ${esc(s)}</span>`).join('')
             bubble.appendChild(src)
           }
-          renderDiagrams(bubble)
+          // 顺序很关键：finalizeBubble 负责**启动**各块的并行判定（建 img、发起 mermaid
+          // 渲染与 html 渲染），必须先启动再等窗口——否则窗口等的是尚未开始的活儿。
+          // 它自身不能被 await（内部渲染耗时不受 done 约束）。
+          finalizeBubble(bubble).catch(() => { /* 判据异常由各块自己降级，不冒泡到回答 */ })
+          // 随后在收尾窗口（≤ answerWaitBudgetMs，自 done 帧到达起算）内并行等待结算；
+          // 到点未结算的块降级。传入 doneFrameAt 让窗口不把前置渲染耗时算进预算。
+          await awaitGateSettlement(bubble, doneFrameAt)
         } else if (event === 'error') {
           streamError = data.error || 'turn failed'
         }
       })
       if (streamError) throw new Error(streamError)
       if (!done && !streamed) throw new Error('stream ended without reply')
+      // P9-1（干净 EOF）：流在「有 delta、无 done、连接正常关闭」处结束。此时上面两条判据
+      // 都不成立（`streamed` 非空 ⇒ 不抛错），于是**不进入 catch**——而唯一调用
+      // `degradePendingGates` 的地方（catch 内）因此不可达，收尾窗口又只挂在 `done` 分支上。
+      // 结果：未结算的 pending 块**永久悬挂**（占位一直转圈）。这里补一条**与 done 无关**的
+      // 收尾路径：流一旦结束且没有 `done`，立刻把未结算块收敛到可读降级终态。
+      // 刻意不抛错、不覆盖已上屏正文（避免把半截回答换成"恢复中/出错"文案）、不阻塞。
+      if (!done) degradePendingGates(chatEl)
     } catch (err) {
       // The stream dropped or stalled (proxy timeout / flaky mobile network /
       // ngrok tunnel blip). The server turn usually still finishes and
@@ -1604,9 +2885,11 @@
       const isNetworkDrop = !done || aborted || /network|fetch|load failed|ended without/i.test(String(err.message || ''))
       if (isNetworkDrop && sessionId) {
         bubble.innerHTML = `<span class="waiting"><span class="spinner-sm"></span>${t('recovering')}</span>`
+        // 断流期间仍停在判定期的块按 P9 先降级：已 passed 的保持显示，不回改
+        degradePendingGates(chatEl)
         const reply = await recoverReply(text)
         if (reply) {
-          bubble.innerHTML = renderMarkdown(reply.text)
+          bubble.innerHTML = renderStreamMarkdown(reply.text, { final: true })
           if (reply.sources && reply.sources.length) {
             const src = document.createElement('div')
             src.className = 'sources'
@@ -1614,7 +2897,7 @@
             bubble.appendChild(src)
           }
           chatEl.scrollTop = chatEl.scrollHeight
-          renderDiagrams(bubble)
+          await finalizeBubble(bubble)
         } else {
           // Genuine failure (or the server never got the message): show it.
           bubble.innerHTML = `<p>${t('errorGeneric')}${esc(err.message)}</p>`
@@ -1626,8 +2909,16 @@
     } finally {
       sendEl.disabled = false
       inputEl.focus()
+      turnCount += 1
+      maybeWarnContext()
     }
   }
+
+  document.getElementById('newChat').addEventListener('click', () => {
+    // 已有对话才需确认，空对话直接开
+    if (chatEl.querySelector('.msg') && !window.confirm(t('newChatConfirm'))) return
+    void startNewChat()
+  })
 
   sendEl.addEventListener('click', send)
   inputEl.addEventListener('keydown', e => {
@@ -1635,6 +2926,9 @@
   })
   // Auto-grow input
   inputEl.addEventListener('input', () => { inputEl.style.height = 'auto'; inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px' })
+  // 离开页面：仍在判定期的块按 P9 降级，绝不让半成品图形留在 DOM 里
+  window.addEventListener('pagehide', () => degradePendingGates(chatEl))
+
   // Restore the previous conversation on refresh, then ensure a live session.
   paintServerVersion()
   restoreHistory().finally(() => {

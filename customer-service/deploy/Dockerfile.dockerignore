@@ -1,0 +1,30 @@
+# dshagent 客服系统 — 构建上下文排除（按 Dockerfile 约定生效）
+#
+# 为什么需要本文件：compose 的构建 context 是**仓库根**（`context: ../..`），
+# 而 `deploy/.dockerignore` 不会对该 context 生效，因此历史构建会把整个
+# node_modules（约 1.8G）打进上下文。Docker ≥20.10 支持
+# `<dockerfile-path>.dockerignore`，用它与 Dockerfile 同目录、精确绑定，
+# 从而**不影响仓库内其它项目的构建**。
+#
+# 注意：**不得排除 `**/lib` 与 `**/dist`** —— Dockerfile 明确依赖本机预构建的
+# `packages/*/lib`（见 Dockerfile 头注释：lib 产物随构建上下文带入），
+# 排除它们会让镜像内缺失运行产物。
+
+.git
+.gitignore
+**/node_modules
+**/*.tsbuildinfo
+**/.dsh
+**/.dsh-build
+.code-cognition
+.agent-presets
+**/coverage
+**/tmp
+**/examples
+**/.pnpm-store
+customer-service/deploy/.env
+customer-service/deploy/kb
+**/.DS_Store
+**/.code-review
+**/.wiki-meta.json
+**/*.log

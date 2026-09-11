@@ -1,0 +1,298 @@
+{
+  "streamingFrames": [
+    {
+      "frame": 0,
+      "html": "<div class=\"bubble\"><span class=\"waiting\"><span class=\"spinner-sm\"></span>正在查询中…</span></div>"
+    },
+    {
+      "frame": 1,
+      "html": "<div class=\"bubble\"><p>先给一段文字说明。</p></div>"
+    },
+    {
+      "frame": 2,
+      "html": "<div class=\"bubble\"><p>先给一段文字说明。</p><div class=\"gate-block\" data-block-type=\"mermaid\" data-block-state=\"pending\"><span class=\"gate-pending\"><span class=\"spinner-sm\"></span>图形正在准备…</span></div></div>"
+    },
+    {
+      "frame": 3,
+      "html": "<div class=\"bubble\"><p>先给一段文字说明。</p><div class=\"gate-block\" data-block-type=\"mermaid\" data-block-state=\"pending\"><span class=\"gate-pending\"><span class=\"spinner-sm\"></span>图形正在准备…</span></div></div>"
+    },
+    {
+      "frame": 4,
+      "html": "<div class=\"bubble\"><p>先给一段文字说明。</p><div class=\"gate-block\" data-block-type=\"mermaid\" data-block-state=\"pending\"><span class=\"gate-pending\"><span class=\"spinner-sm\"></span>图形正在准备…</span></div></div>"
+    },
+    {
+      "frame": 5,
+      "html": "<div class=\"bubble\"><p>先给一段文字说明。</p><div class=\"gate-block\" data-block-type=\"mermaid\" data-block-state=\"pending\"><span class=\"gate-pending\"><span class=\"spinner-sm\"></span>图形正在准备…</span></div></div>"
+    },
+    {
+      "frame": 6,
+      "html": "<div class=\"bubble\"><p>先给一段文字说明。</p><div class=\"mermaid-src\" data-block-state=\"loading\" data-block-key=\"blk-mermaid-7e3f9ff54a8ede0f-7e3f9ff54a8ede0f\"><span class=\"gate-pending\"><span class=\"spinner-sm\"></span>图形正在准备…</span></div></div>"
+    },
+    {
+      "frame": 7,
+      "html": "<div class=\"bubble\"><p>先给一段文字说明。</p><div class=\"mermaid-src\" data-block-state=\"degraded\" data-block-key=\"blk-mermaid-7e3f9ff54a8ede0f-7e3f9ff54a8ede0f\"><div class=\"gate-degraded\" data-block-state=\"degraded\">示意图暂时无法显示，您可以先看上面的文字说明。</div></div><p>结尾文字。</p></div>"
+    },
+    {
+      "frame": 8,
+      "html": "<div class=\"bubble\"><p>先给一段文字说明。</p><div class=\"mermaid-src\" data-block-state=\"degraded\" data-block-key=\"blk-mermaid-7e3f9ff54a8ede0f-7e3f9ff54a8ede0f\"><div class=\"gate-degraded\" data-block-state=\"degraded\">示意图暂时无法显示，您可以先看上面的文字说明。</div></div><p>结尾文字。</p></div>"
+    }
+  ],
+  "mermaidUnavailable": {
+    "containsFenceBackticks": false,
+    "containsPreCode": false,
+    "containsPendingState": false,
+    "containsDegradedState": true,
+    "html": "<div class=\"bubble\"><p>先给一段文字说明。</p><div class=\"mermaid-src\" data-block-state=\"degraded\" data-block-key=\"blk-mermaid-7e3f9ff54a8ede0f-7e3f9ff54a8ede0f\"><div class=\"gate-degraded\" data-block-state=\"degraded\">示意图暂时无法显示，您可以先看上面的文字说明。</div></div><p>结尾文字。</p></div>"
+  },
+  "chartNonArray": {
+    "containsFenceBackticks": false,
+    "containsPreCode": false,
+    "containsPendingState": false,
+    "containsDegradedState": true,
+    "html": "<div class=\"bubble\"><p>说明文字。</p><div class=\"chart\" data-block-state=\"degraded\" data-block-key=\"blk-chart-0ca27ceef5cd49bd-0ca27ceef5cd49bd\"><div class=\"gate-degraded\" data-block-state=\"degraded\">图表暂时无法显示，您可以先看上面的文字说明。</div></div><p>结尾。</p></div>"
+  },
+  "chartBadJson": {
+    "containsFenceBackticks": false,
+    "containsPreCode": false,
+    "containsPendingState": false,
+    "containsDegradedState": true,
+    "html": "<div class=\"bubble\"><p>说明文字。</p><div class=\"chart\" data-block-state=\"degraded\" data-block-key=\"blk-chart-d20b0011347fae3f-d20b0011347fae3f\"><div class=\"gate-degraded\" data-block-state=\"degraded\">图表暂时无法显示，您可以先看上面的文字说明。</div></div><p>结尾。</p></div>"
+  },
+  "htmlEmpty": {
+    "containsFenceBackticks": false,
+    "containsPreCode": false,
+    "containsPendingState": false,
+    "containsDegradedState": true,
+    "html": "<div class=\"bubble\"><p>说明文字。</p><div class=\"gate-degraded\" data-block-state=\"degraded\">这部分内容暂时无法显示，您可以先看上面的文字说明。</div><p>结尾。</p></div>"
+  },
+  "mermaidNotDiagram": {
+    "containsFenceBackticks": false,
+    "containsPreCode": false,
+    "containsPendingState": false,
+    "containsDegradedState": true,
+    "html": "<div class=\"bubble\"><p>说明文字。</p><div class=\"mermaid-src\" data-block-state=\"degraded\" data-block-key=\"blk-mermaid-de507729f7363c2c-de507729f7363c2c\"><div class=\"gate-degraded\" data-block-state=\"degraded\">示意图暂时无法显示，您可以先看上面的文字说明。</div></div><p>结尾。</p></div>"
+  },
+  "image_目录穿越（可回落访客 API 出口）": {
+    "containsFenceBackticks": false,
+    "containsPreCode": false,
+    "containsPendingState": false,
+    "containsDegradedState": true,
+    "html": "<div class=\"bubble\"><p>说明。</p><div class=\"gate-degraded\" data-block-state=\"degraded\">图片暂时无法显示（源站可能已移除该图）。</div></div>"
+  },
+  "image_绝对 URL（会把访客 IP/UA 送到第三方）": {
+    "containsFenceBackticks": false,
+    "containsPreCode": false,
+    "containsPendingState": false,
+    "containsDegradedState": true,
+    "html": "<div class=\"bubble\"><p>说明。</p><div class=\"gate-degraded\" data-block-state=\"degraded\">图片暂时无法显示（源站可能已移除该图）。</div></div>"
+  },
+  "image_data: 图片": {
+    "containsFenceBackticks": false,
+    "containsPreCode": false,
+    "containsPendingState": false,
+    "containsDegradedState": true,
+    "html": "<div class=\"bubble\"><p>说明。</p><div class=\"gate-degraded\" data-block-state=\"degraded\">图片暂时无法显示（源站可能已移除该图）。</div></div>"
+  },
+  "image_查询串": {
+    "containsFenceBackticks": false,
+    "containsPreCode": false,
+    "containsPendingState": false,
+    "containsDegradedState": true,
+    "html": "<div class=\"bubble\"><p>说明。</p><div class=\"gate-degraded\" data-block-state=\"degraded\">图片暂时无法显示（源站可能已移除该图）。</div></div>"
+  },
+  "image_嵌套目录": {
+    "containsFenceBackticks": false,
+    "containsPreCode": false,
+    "containsPendingState": false,
+    "containsDegradedState": true,
+    "html": "<div class=\"bubble\"><p>说明。</p><div class=\"gate-degraded\" data-block-state=\"degraded\">图片暂时无法显示（源站可能已移除该图）。</div></div>"
+  },
+  "image_非图片扩展名": {
+    "containsFenceBackticks": false,
+    "containsPreCode": false,
+    "containsPendingState": false,
+    "containsDegradedState": true,
+    "html": "<div class=\"bubble\"><p>说明。</p><div class=\"gate-degraded\" data-block-state=\"degraded\">图片暂时无法显示（源站可能已移除该图）。</div></div>"
+  },
+  "image_百分号编码绕过": {
+    "containsFenceBackticks": false,
+    "containsPreCode": false,
+    "containsPendingState": false,
+    "containsDegradedState": true,
+    "html": "<div class=\"bubble\"><p>说明。</p><div class=\"gate-degraded\" data-block-state=\"degraded\">图片暂时无法显示（源站可能已移除该图）。</div></div>"
+  },
+  "image_其它协议": {
+    "containsFenceBackticks": false,
+    "containsPreCode": false,
+    "containsPendingState": false,
+    "containsDegradedState": true,
+    "html": "<div class=\"bubble\"><p>说明。</p><div class=\"gate-degraded\" data-block-state=\"degraded\">图片暂时无法显示（源站可能已移除该图）。</div></div>"
+  },
+  "image_legal": {
+    "containsFenceBackticks": false,
+    "containsPreCode": false,
+    "containsPendingState": false,
+    "containsDegradedState": true,
+    "html": "<div class=\"bubble\"><p>说明。</p><figure class=\"kb-image\" data-block-state=\"degraded\" data-block-key=\"blk-image-be4cc1263d743986-be4cc1263d743986\"><div class=\"gate-degraded\" data-block-state=\"degraded\">图片暂时无法显示（源站可能已移除该图）。</div><figcaption>澳门电费说明</figcaption></figure></div>"
+  },
+  "imageStates": [
+    "validating",
+    "degraded"
+  ],
+  "multiBlockParallel": {
+    "containsFenceBackticks": false,
+    "containsPreCode": false,
+    "containsPendingState": false,
+    "containsDegradedState": false,
+    "html": "<div class=\"bubble\"><p>先说一段文字。</p><div class=\"mermaid-src mermaid-done\" data-block-state=\"passed\" data-block-key=\"blk-mermaid-a42fe0bae65399b3-a42fe0bae65399b3\"><svg id=\"dsh-mmd-mmd-7\" viewBox=\"0 0 320 180\"><rect width=\"320\" height=\"180\"></rect></svg></div><figure class=\"kb-image\" data-block-state=\"passed\" data-block-key=\"blk-image-be4cc1263d743986-be4cc1263d743986\"><img width=\"1000\" height=\"560\" alt=\"图注\" src=\"/uploads/banner_cs_9af26b7f16.png\"><figcaption>图注</figcaption></figure><p>结尾。</p></div>"
+  },
+  "src3Table": [
+    {
+      "renderer": "mermaid（语法错误/非图文本）",
+      "preCode": 0,
+      "fenceBackticks": false,
+      "sourceText": false,
+      "degradedText": true
+    },
+    {
+      "renderer": "image（路径非法）",
+      "preCode": 0,
+      "fenceBackticks": false,
+      "sourceText": false,
+      "degradedText": true
+    },
+    {
+      "renderer": "chart（非法 JSON）",
+      "preCode": 0,
+      "fenceBackticks": false,
+      "sourceText": false,
+      "degradedText": true
+    },
+    {
+      "renderer": "chart（JSON 合法但非数组）",
+      "preCode": 0,
+      "fenceBackticks": false,
+      "sourceText": false,
+      "degradedText": true
+    },
+    {
+      "renderer": "html（空块）",
+      "preCode": 0,
+      "fenceBackticks": false,
+      "sourceText": false,
+      "degradedText": true
+    }
+  ],
+  "t1Budget": {
+    "inWindow": {
+      "latency": 495,
+      "mermaid": "passed",
+      "image": "passed"
+    },
+    "overWindow": {
+      "latency": 577,
+      "mermaid": "degraded",
+      "image": "passed"
+    }
+  },
+  "blockEvents": {
+    "containsFenceBackticks": false,
+    "containsPreCode": false,
+    "containsPendingState": false,
+    "containsDegradedState": true,
+    "html": "<div class=\"bubble\"><p>停电处理流程如下。</p><div class=\"gate-blocks\"><div class=\"mermaid-src mermaid-done\" data-block-state=\"passed\" data-block-key=\"blk-blk-1-a42fe0bae65399b3\" data-block-id=\"blk-1\"><svg id=\"dsh-mmd-mmd-4\" viewBox=\"0 0 320 180\"><rect width=\"320\" height=\"180\"></rect></svg></div><figure class=\"kb-image\" data-block-state=\"passed\" data-block-key=\"blk-blk-2-be4cc1263d743986\" data-block-id=\"blk-2\"><img width=\"1000\" height=\"560\" alt=\"澳门电费说明\" src=\"/uploads/banner_cs_9af26b7f16.png\"><figcaption>澳门电费说明</figcaption></figure><div class=\"gate-degraded\" data-block-state=\"degraded\">图表暂时无法显示，您可以先看上面的文字说明。</div></div><div class=\"sources\"><span>📄 政策.pdf</span></div></div>"
+  },
+  "paths": {
+    "pathBlocks": {
+      "mermaidContainers": 1,
+      "blockHosts": 1,
+      "svg": 1,
+      "leaks": 0,
+      "preCode": 0
+    },
+    "pathLegacy": {
+      "mermaidContainers": 1,
+      "blockHosts": 0,
+      "svg": 1,
+      "leaks": 0,
+      "preCode": 0
+    },
+    "pathBoth": {
+      "mermaidContainers": 1,
+      "blockHosts": 1,
+      "svg": 1,
+      "leaks": 0,
+      "preCode": 0
+    }
+  },
+  "fenceFallbackStreaming": {
+    "samples": 30,
+    "leaked": 0,
+    "firstLeak": null,
+    "containers": 1,
+    "svg": 1
+  },
+  "f1_①": {
+    "containsFenceBackticks": false,
+    "containsPreCode": true,
+    "containsPendingState": false,
+    "containsDegradedState": true,
+    "html": "<div class=\"bubble\"><p>说明：</p><pre><code>print(1)</code></pre><div class=\"mermaid-src\" data-block-state=\"degraded\" data-block-key=\"blk-mermaid-5440668fffb9735d-5440668fffb9735d\"><div class=\"gate-degraded\" data-block-state=\"degraded\">示意图暂时无法显示，您可以先看上面的文字说明。</div></div><p>结束。</p></div>"
+  },
+  "f1_②": {
+    "containsFenceBackticks": false,
+    "containsPreCode": true,
+    "containsPendingState": false,
+    "containsDegradedState": true,
+    "html": "<div class=\"bubble\"><p>说明：</p><pre><code>print(1)</code></pre><div class=\"mermaid-src\" data-block-state=\"degraded\" data-block-key=\"blk-mermaid-76b3ec0f5510721a-76b3ec0f5510721a\"><div class=\"gate-degraded\" data-block-state=\"degraded\">示意图暂时无法显示，您可以先看上面的文字说明。</div></div><p>结束。</p></div>"
+  },
+  "f1_③": {
+    "containsFenceBackticks": false,
+    "containsPreCode": false,
+    "containsPendingState": false,
+    "containsDegradedState": false,
+    "html": "<div class=\"bubble\"><table><thead><tr><th>场景</th><th>写法</th></tr></thead><tbody><tr><td>流程图</td><td>示意图暂时无法显示，您可以先看上面的文字说明。</td></tr></tbody></table></div>"
+  },
+  "f1_③-b": {
+    "containsFenceBackticks": false,
+    "containsPreCode": false,
+    "containsPendingState": false,
+    "containsDegradedState": false,
+    "html": "<div class=\"bubble\"><table><thead><tr><th>场景</th><th>写法</th></tr></thead><tbody><tr><td>流程</td><td>示意图暂时无法显示，您可以先看上面的文字说明。</td></tr></tbody></table></div>"
+  },
+  "f1_③-c": {
+    "containsFenceBackticks": false,
+    "containsPreCode": false,
+    "containsPendingState": false,
+    "containsDegradedState": false,
+    "html": "<div class=\"bubble\"><table><thead><tr><th>场景</th><th>写法</th></tr></thead><tbody><tr><td>流程</td><td>流程图 示意图暂时无法显示，您可以先看上面的文字说明。</td></tr></tbody></table></div>"
+  },
+  "f1_③-d": {
+    "containsFenceBackticks": false,
+    "containsPreCode": false,
+    "containsPendingState": false,
+    "containsDegradedState": false,
+    "html": "<div class=\"bubble\"><table><thead><tr><th>场景</th><th>写法</th></tr></thead><tbody><tr><td>流程</td><td>示意图暂时无法显示，您可以先看上面的文字说明。</td></tr><tr><td></td><td></td></tr><tr><td></td><td></td></tr></tbody></table></div>"
+  },
+  "f1_③-e": {
+    "containsFenceBackticks": false,
+    "containsPreCode": false,
+    "containsPendingState": false,
+    "containsDegradedState": false,
+    "html": "<div class=\"bubble\"><table><thead><tr><th>场景</th><th>写法</th></tr></thead><tbody><tr><td>流程</td><td>示意图暂时无法显示，您可以先看上面的文字说明。</td></tr></tbody></table><p>结束。</p></div>"
+  },
+  "doneFinalize": {
+    "containsFenceBackticks": false,
+    "containsPreCode": false,
+    "containsPendingState": false,
+    "containsDegradedState": true,
+    "html": "<div class=\"bubble\"><p>文字。</p><div class=\"gate-blocks\"><div class=\"gate-block\" data-block-type=\"mermaid\" data-block-state=\"degraded\"><div class=\"gate-degraded\" data-block-state=\"degraded\">示意图暂时无法显示，您可以先看上面的文字说明。</div></div></div></div>"
+  },
+  "sourcesAndStreaming": {
+    "containsFenceBackticks": false,
+    "containsPreCode": false,
+    "containsPendingState": false,
+    "containsDegradedState": false,
+    "html": "<div class=\"bubble\"><p>第一段。</p><p>第二段。</p><div class=\"sources\"><span>📄 政策说明.pdf</span></div></div>"
+  }
+}

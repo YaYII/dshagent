@@ -104,7 +104,40 @@
 | Guest 前端 | `apps/guest-web/`（新 Vite 应用） | 纯聊天界面，Markdown+HTML 图表/图片渲染 |
 | Guest 后端通道 | 复用 api session-controller / 新增轻量 JSON 网关 | 匿名会话 + 限流 |
 | 部署 | `deploy/` Dockerfile + compose + nginx + .env.example | 单服务 |
+| **输出前自审门禁** | `plugins/output-gate/` + `web/guest/`（前端执行端） | 图形块在送达前校验、不通过即降级（详见 §3.5） |
 | 文档 | `docs/customer-service/*` | 本设计 + 部署 + 验收 |
+
+### 3.5 输出前自审门禁（新增能力）
+
+**目标**：客服/访客回答中的图形围栏（`mermaid`/`chart`/`image`/`html`）在**送达访客之前**经过确定性
+校验，不通过则**定向降级剥离**——**绝不把坏图或原始围栏源码交给访客**。
+
+**分级门禁**：文字保持流式；**块级先审后渲染**。主机侧跨分帧围栏状态机把图形块从 delta 流**摘出**，
+以结构化 `block` 事件下发；**围栏源码不出现在任何载荷字段**（口径 B），源码仅以 base64 承载。
+
+**三出口收口（不可绕过）**：`/api/guest/chat`、`/api/guest/chat/stream`、`/api/guest/history`
+均由主机侧同一门禁处理，**不依赖提示词或前端自觉**。
+
+**判定职责分层**：
+
+| 层 | 职责 | 说明 |
+|---|---|---|
+| 主机侧 | 结构性判定 | IMG1 图片路径白名单、chart 数据结构、html 非空/字节上限、超预算、未闭合、流中止 |
+| 访客端（真机） | 渲染后实测 | 空图、异常比例、`naturalWidth`、脚本类 html —— **只能真机判定** |
+| 留痕 | 真机结论回传 | `/api/guest/render-report` → `ctx.logger.warn`（前缀 `guest.output-gate`，7 字段） |
+
+**关键语义**：`blockResults[id]` 是**门禁放行终态**（`'passed' | 'degraded'`），四种来源（主机侧降级 /
+真机回传两态 / **等待窗口内未回传 → `passed`**）；**`passed` ≠ 真机已验证**（真机证据归属留痕）。
+**不做模型重写**（REP1）：无二次生成、不回改已上屏内容，未通过即降级。
+
+**不做几何校验**：主机侧不调用 mermaid 渲染器、不依赖 DOM —— 与真机同构的判定留在真机。
+
+**已知权衡**：开/闭判据**有意不对称**（起始允许前导内容以防缩进/引用块泄漏；闭合要求整行仅围栏字符）
+⇒ 闭合行含前导内容时块视为未闭合，**其后正文一并被扣留**（防泄漏的代价）。详见
+`docs/output-self-review-delivery.md` §6.4（含待决事项与守护断言）。
+
+**生效条件**：前端 `web/guest/**` 经 bind-mount **改文件即生效**；主机侧 `plugins/**` 与
+`presets/**`、`deploy/profile/**` **须重建镜像**才生效（仅重启无效）。
 
 ## 4. 模型路由 / Admin 配置（复用）
 

@@ -18,6 +18,22 @@
   config:
     default: customer-service
 
+# ── 日志导出器（可观测性基础设施）──────────────────────────────────────────
+# 官方各 bundle 都不含日志导出器，未挂载时 `ctx.logger.*` 全部静默丢弃——门禁的
+# 留痕（guest.output-gate …）与「门禁未生效」告警都会消失，运维无从判断门禁是否
+# 在跑。这里挂官方 console 导出器，把 warn 级以上的记录输出到容器 stdout
+# （docker logs 可见）。行序无关，但必须存在。
+- insert:
+    - id: logger-console
+      name: '@deepseek-ai/cordis-plugin-logger-console'
+      config:
+        colors: false
+        # 默认级别只放行 error，会让门禁留痕（warn）与「门禁未生效」告警全部沉底。
+        # 3 = debug，即输出全部级别；容器日志由 docker logs 采集。
+        levels:
+          default: 3
+        showTime: ''
+
 # ── 模型路由（客服部署自带默认 provider）────────────────────────────────────
 # llm-pi-ai 行级静态 providers：部署通过环境变量注入 apiKey（见 docker-compose
 # 的 env_file）。Admin 仍可在设置页覆盖/新增 provider；此处提供容器开箱即用的
@@ -100,17 +116,45 @@
     provider: commandcode
     model: deepseek/deepseek-v4.1-flash
 
-# ── Guest 游客 HTTP 桥（host 层）───────────────────────────────────────────
+# ── Guest 游客 HTTP 桥 + 输出前自审门禁（host 层）──────────────────────────
 # 匿名访客对话 JSON API（/api/guest/*），驱动 customer-service-guest preset
-# 会话；自带按 IP 限流。路径在 Docker 内固定为 /app/customer-service。
+# 会话。路径在 Docker 内固定为 /app/customer-service。
+#
+# 行序有意义：guest-server 用 `ctx.get('outputGate')` 取门禁服务，因此 output-gate
+# 必须排在它前面，保证访客桥的第一个请求就已经带门禁。
 - insert:
+    # ── 输出前自审门禁 ────────────────────────────────────────────────────
+    # 三条访客出口（/chat、/chat/stream、/history）的收口：受控图形围栏
+    # （mermaid/chart/image/html）在主机侧被摘成结构化块，围栏源码不进任何载荷。
+    # 下列取值即需求 v3.2 §13 冻结默认值，显式写出便于部署方单点调整。
+    # 无任何事后重写开关：REP1 冻结「不做事后重写」，门禁不做第二次模型调用。
+    - id: output-gate
+      name: '/app/customer-service/plugins/output-gate/src/index.ts'
+      config:
+        gate:
+          enabled: true
+          # 单块 validating 判定超时（captain 冻结）
+          blockTimeoutMs: 1500
+          # done 前结算的收尾窗口（P7 并行语义，非串行总配额）
+          answerWaitBudgetMs: 600
+          # 渲染器（mermaid 库）就绪上限：与判定计时分离，否则首图必被误降级
+          libraryLoadTimeoutMs: 8000
+          # 单块字节上限：超出直接降级（不渲染、不下发源码）
+          maxBlockBytes: 32768
+          # 图片可达性探测：结论仅留痕，不参与放行（C6，v3.2）
+          serverImageProbe: true
+          serverImageProbeTimeoutMs: 2000
+          reportPath: '/api/guest/render-report'
     - id: guest-server
       name: '/app/customer-service/plugins/guest-server/src/index.ts'
       config:
         preset: customer-service-guest
         workspace: /kb
         # 部署构建戳：guest-server/服务有变更时递增，报障"工号+版本"即可定位是哪个构建在答。
-        serviceVersion: '2026-09-10.8'
+        # 本次递增理由：输出前自审门禁落地（主机侧围栏状态机 + 三出口收口 + 前端块槽位渲染
+        # 与表格/CRLF/NO_GATE 加固）。注意本值是**镜像构建戳**：改源码值不等于生效——须重建镜像，
+        # 之后 /api/guest/health 的 version 才会反映新值；不重建则线上仍报旧值。
+        serviceVersion: '2026-09-11.11'
         # Customer-service Q&A is retrieval-grounded: pin a low reasoning
         # effort so one uncertain turn cannot burn ~15-20s on a long internal
         # reasoning chain before the first answer token reaches the visitor.

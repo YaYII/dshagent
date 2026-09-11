@@ -45,3 +45,11 @@ worktrees/
 .code-cognition/
 .dsh/
 customer-service/deploy/.env
+# 客服门禁联调期间的本地 stub/调试产物（临时日志与协议样本，不入库）
+customer-service/**/gs*.log
+customer-service/**/stub*.log
+customer-service/**/guest-server-*.log
+customer-service/sse-proto.txt
+gs*.log
+stub.log
+sse-proto.txt

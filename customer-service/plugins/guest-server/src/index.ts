@@ -9,10 +9,20 @@
  *
  * Route contract (all JSON, UTF-8):
  *   POST /api/guest/session   -> 201 { sessionId, version }  (new visitor session)
- *   POST /api/guest/chat      -> 200 { reply, sources }  (send one message, await reply)
+ *   DELETE /api/guest/session?sessionId=… -> 200 { closed }  (访客「新对话」：回收旧会话内存)
+ *   POST /api/guest/chat      -> 200 { reply, sources, blocks, gate }
+ *   POST /api/guest/chat/stream -> SSE: `meta` -> N x (`delta` | `block-open` | `block`)
+ *                                 -> `done`, plus `notice`/`error`
+ *   GET  /api/guest/history   -> 200 { sessionId, messages }  (same gate, same terminal state)
+ *   POST /api/guest/render-report -> 202 { ok }  (browser-measured verdicts; trace only)
  *   GET  /api/guest/health    -> 200 { ok: true, version }
  * (version = Config.serviceVersion, the deployment build stamp shown on the
  * guest UI badge; SSE meta events carry it too.)
+ *
+ * 输出前自审门禁（`customer-service/plugins/output-gate`）：本桥的每一个访客可见
+ * 字节都经主机侧门禁出关——受控图形围栏（mermaid/chart/image/html）从文字流里摘成
+ * 结构化块，三条出口的载荷里都不出现原始围栏源码。线上协议与访客端契约见
+ * `customer-service/docs/output-gate-contract.md`。
  *
  * Per-IP rate limiting is enforced in memory on the chat route: each client
  * may send at most `rateLimitPerWindow` chats per `rateLimitWindowMs`. The
@@ -40,8 +50,23 @@ import { createUserMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 
 /** Export shape expected of function plugins. */
 export const name = 'guest-server'
-/** Services this plugin registers against. */
+/**
+ * Services this plugin registers against. `outputGate` is read with `ctx.get()`
+ * rather than injected: the bridge must still serve visitors when the gate plugin
+ * is absent or disabled (degraded mode), instead of refusing to mount.
+ */
 export const inject = ['webServer', 'agents', 'sessionQuery', 'sessionPersistence', 'agentDefaultModel', 'agentPresets']
+
+/**
+ * 门禁服务的结构性消费面。
+ *
+ * 只声明真正用到的成员：`beginTurn`/`gateReply` 净化载荷，`configPayload` 随
+ * `meta`/`done` 下发访客端预算，`recordReport` 收真机回传（O3 去重统计），
+ * `acceptedReasons` 校验回传原因。
+ * 类型来自 output-gate 引擎包（跨插件目录的相对 import，与 preset 里的绝对路径
+ * 加载方式一致：两者都在 `customer-service/` 下）。
+ */
+type OutputGateLike = import('../../output-gate/src/index.ts').OutputGateService
 
 /** Guest-server configuration. */
 export interface Config {
@@ -232,6 +257,44 @@ export function apply(ctx: Context, config: Config): void {
   const guard = new AttackGuard(config.spamWindowMs, config.spamRepeat, config.blockMs)
 
   /**
+   * 主机侧门禁服务（`output-gate` 插件提供）。缺失即降级为「不净化」——桥本身仍然
+   * 可用，但这是组合配置错误：留一条主机侧告警，绝不静默。
+   */
+  const gate: OutputGateLike | undefined = ctx.get('outputGate') as OutputGateLike | undefined
+  if (gate === undefined) {
+    ctx.logger.warn('guest.output-gate unavailable: visitor payloads leave without the output gate (check the output-gate plugin row)')
+  }
+
+  /**
+   * F-5：门禁**已挂载但被关闭**（`gate.enabled === false`，回滚开关）时的告警节流。
+   * 该分支此前完全静默：载荷原样下发、前端只能走兜底路径，而主机侧日志里没有任何
+   * 痕迹，运维无法区分「门禁在跑」与「门禁被关掉了」。这里按会话+路径各告警一次，
+   * 既不丢可观测性，也不会因为高频对话刷爆日志。
+   */
+  const warnedGateDisabled = new Set<string>()
+  const warnGateDisabledOnce = (sessionId: string, path: string): void => {
+    if (gate === undefined) return // 未挂载已在启动时告警过，无需重复
+    const key = `${path}:${sessionId}`
+    if (warnedGateDisabled.has(key)) return
+    warnedGateDisabled.add(key)
+    if (warnedGateDisabled.size > 200) {
+      const oldest = warnedGateDisabled.values().next().value
+      if (oldest !== undefined) warnedGateDisabled.delete(oldest)
+    }
+    ctx.logger.warn(`guest.output-gate disabled (gate.enabled=false): the ${path} path serves the reply without fence extraction; check the output-gate config`)
+  }
+
+  /** 本轮门禁配置（`meta`/`done` 随载荷下发访客端，保证预算单点可调）。 */
+  const gateConfig = (): unknown => gate?.configPayload ?? null
+
+  /** 访客请求的源站（图片可达性探测用；探测仅告警，不参与放行）。 */
+  const requestOrigin = (req: IncomingMessage): string => {
+    const proto = typeof req.headers['x-forwarded-proto'] === 'string' ? req.headers['x-forwarded-proto'] : 'http'
+    const host = req.headers.host ?? ''
+    return host === '' ? '' : `${proto}://${host}`
+  }
+
+  /**
    * Two-stage, attack-aware admission for one chat request, keyed by the
    * SESSION (one person's conversation), never the IP.
    * @returns `{ kind: 'block', status, body }` — refuse with a calm-down
@@ -281,7 +344,7 @@ export function apply(ctx: Context, config: Config): void {
    * reads parse fresh and store nothing; a finished turn drops the snapshot, and
    * the next idle read repopulates it.
    */
-  const historyCache = new Map<string, { at: number; messages: Array<{ role: string; text: string }> }>()
+  const historyCache = new Map<string, { at: number; messages: Array<{ role: string; text: string; blocks?: unknown[]; blockResults?: Record<string, string>; degradedIds?: string[] }> }>()
   const activeTurns = new Set<string>()
   const HISTORY_CACHE_MAX = 200
 
@@ -418,7 +481,7 @@ export function apply(ctx: Context, config: Config): void {
   }
 
   /** Run one chat turn and return the assistant reply plus cited sources. */
-  const runChat = async (sessionId: string, text: string, lang: unknown): Promise<{ reply: string; sources: string[] }> => {
+  const runChat = async (sessionId: string, text: string, lang: unknown, origin: string): Promise<{ reply: string; sources: string[] }> => {
     beginTurn(sessionId)
     try {
       await ensureGuest(sessionId)
@@ -454,23 +517,80 @@ export function apply(ctx: Context, config: Config): void {
    */
   const streamers = new Map<string, (event: string, data: unknown) => void>()
 
+  /** 本轮的输出前自审结果（三条出口共用同一形态）。 */
+  interface GatedReply {
+    /** 净化后的正文（受控图形块已摘除，不含任何围栏源码）。 */
+    reply: string
+    /** 来源引用（仍从完整回答提取，口径不变）。 */
+    sources: string[]
+    /** 结构化块（`decision: 'render'` 的块含 base64 源码承载）。 */
+    blocks: unknown[]
+    /** 真机裁决结论（块 id → 终态）。 */
+    blockResults: Record<string, string>
+    /** 已降级块 id。 */
+    degradedIds: string[]
+  }
+
+  /**
+   * 把一轮完整回答交给门禁净化（非流式路径与历史重放共用）。
+   *
+   * 门禁不可用（插件缺失）或自身抛错时回落到「原样返回」：这一分支只在组合配置
+   * 错误或引擎异常时出现，且必须留主机侧痕迹——门禁正常时它不可达。
+   */
+  const gateFullReply = async (
+    sessionId: string,
+    reply: string,
+    lang: unknown,
+    origin: string,
+  ): Promise<GatedReply> => {
+    const withExtras = (payload: { text: string; blocks: unknown[]; blockResults: Record<string, string>; degradedIds: string[] }): GatedReply => ({
+      reply: payload.text,
+      sources: extractSources(reply),
+      blocks: payload.blocks,
+      blockResults: payload.blockResults,
+      degradedIds: payload.degradedIds,
+    })
+    if (gate === undefined || !gate.enabled) {
+      if (gate !== undefined) warnGateDisabledOnce(sessionId, 'non-streaming')
+      return withExtras({ text: reply, blocks: [], blockResults: {}, degradedIds: [] })
+    }
+    try {
+      const payload = await gate.gateReply(sessionId, reply, undefined, { origin, language: typeof lang === 'string' ? lang : '' })
+      return withExtras(payload)
+    } catch (error) {
+      ctx.logger.warn(`guest.output-gate failed on the non-streaming path; serving the raw reply: ${describeError(error)}`)
+      return withExtras({ text: reply, blocks: [], blockResults: {}, degradedIds: [] })
+    }
+  }
+
   /**
    * Run one streamed turn: send the user message, wait for quiescence while
-   * text deltas are pushed to `onDelta`, then return the final reply.
+   * text deltas are pushed through the output gate, then return the final reply.
+   *
+   * 流式路径的净化点在这里：每一帧先过状态机，正文照常以 `delta` 外发，受控图形块
+   * 变成 `block-open`/`block` 结构化事件——因此坏块不可能先以 delta 形式流出；未通过
+   * 的块在占位态就被替换为可读文字（REP2），不回改已上屏内容（REP5）。
    */
   const runChatStream = async (
     sessionId: string,
     text: string,
     lang: unknown,
-    onDelta: (delta: string) => void,
-  ): Promise<{ reply: string; sources: string[] }> => {
+    origin: string,
+    onGate: (event: { type: string; [key: string]: unknown }) => void,
+  ): Promise<{ reply: string; sources: string[]; payload: GatedReply }> => {
     await ensureGuest(sessionId)
     const guest = guests.get(sessionId)
     if (guest === undefined) throw new Error('unknown session')
     const agent = ctx.agents.get(sessionId as never)
     if (agent === undefined) throw new Error('session agent is not live')
+    if (gate !== undefined && !gate.enabled) warnGateDisabledOnce(sessionId, 'streaming')
+    const turn = gate === undefined || !gate.enabled
+      ? undefined
+      : gate.beginTurn(sessionId, event => { onGate(event) }, { origin, language: typeof lang === 'string' ? lang : '' })
     streamers.set(sessionId, (_event, data) => {
-      onDelta(String((data as { text?: string }).text ?? ''))
+      const delta = String((data as { text?: string }).text ?? '')
+      if (turn === undefined) onGate({ type: 'text', text: delta })
+      else turn.feed(delta)
     })
     beginTurn(sessionId)
     try {
@@ -489,12 +609,34 @@ export function apply(ctx: Context, config: Config): void {
       }
       await agent.whenIdle()
       const reply = await readLatestAssistantText(sessionId as never)
-      return { reply, sources: extractSources(reply) }
+      if (turn === undefined) {
+        return {
+          reply,
+          sources: extractSources(reply),
+          payload: { reply, sources: extractSources(reply), blocks: [], blockResults: {}, degradedIds: [] },
+        }
+      }
+      const payload = await turn.settle()
+      return {
+        reply: payload.text,
+        sources: extractSources(reply),
+        payload: {
+          reply: payload.text,
+          sources: extractSources(reply),
+          blocks: payload.blocks,
+          blockResults: payload.blockResults,
+          degradedIds: payload.degradedIds,
+        },
+      }
     } finally {
       streamers.delete(sessionId)
       endTurn(sessionId)
     }
   }
+
+  /** 统一错误描述（留痕用）。 */
+  const describeError = (error: unknown): string =>
+    error instanceof Error ? error.message : String(error)
 
   // Forward assistant text deltas of live turns to the matching stream
   // subscriber. `session/event` fires for every committed event of every
@@ -546,16 +688,29 @@ export function apply(ctx: Context, config: Config): void {
   }
 
   /**
+   * 历史里的单条消息。assistant 消息带门禁附加字段（blocks/blockResults/degradedIds），
+   * 因此刷新重放与当轮送达走同一份结构化判定——刷新不会把当轮已降级的源码重新露出来
+   * （E4），也不会在 history 载荷里出现围栏源码（E7）。
+   */
+  interface HistoryMessage {
+    role: string
+    text: string
+    blocks?: unknown[]
+    blockResults?: Record<string, string>
+    degradedIds?: string[]
+  }
+
+  /**
    * Read the guest conversation as a message list for refresh recovery:
    * user messages and their assistant replies, in order, from the durable
    * session log.
-   * @returns `[{ role: 'user'|'assistant', text }]` in chronological order.
+   * @returns `[{ role, text, blocks?, blockResults?, degradedIds? }]` in chronological order.
    */
-  const readHistoryFromLog = async (sessionId: string): Promise<Array<{ role: string; text: string }>> => {
+  const readHistoryFromLog = async (sessionId: string): Promise<HistoryMessage[]> => {
     if (!isGuestSessionId(sessionId)) throw new Error('unknown session')
     const snapshot = await ctx.sessionQuery.readSession(sessionId as never)
     const events = (snapshot as unknown as { events: Array<Record<string, unknown>> }).events ?? []
-    const messages: Array<{ role: string; text: string }> = []
+    const messages: HistoryMessage[] = []
     for (const ev of events) {
       if (ev.type === 'user/message') {
         const data = ev.data as { content?: Array<{ type?: string; text?: string }>; source?: { kind?: string } } | undefined
@@ -568,11 +723,15 @@ export function apply(ctx: Context, config: Config): void {
         if (text.length > 0) messages.push({ role: 'user', text })
       } else if (ev.type === 'assistant/message') {
         const data = ev.data as { message?: { content?: Array<{ type?: string; text?: string }> } } | undefined
-        const text = (data?.message?.content ?? [])
+        const raw = (data?.message?.content ?? [])
           .filter(b => b.type === 'text' && typeof b.text === 'string')
           .map(b => b.text as string)
           .join('')
-        if (text.length > 0) messages.push({ role: 'assistant', text })
+        if (raw.length === 0) continue
+        // 落盘的回答是模型原文（可能含围栏），重放前必须重新过门禁：判定与当轮同一份代码，
+        // 因此终态一致；坏块的源码在这里被摘除，不会被刷新"重新暴露"。
+        const gated = await gateFullReply(sessionId, raw, undefined, '')
+        messages.push({ role: 'assistant', text: gated.reply, blocks: gated.blocks, blockResults: gated.blockResults, degradedIds: gated.degradedIds })
       }
     }
     return messages
@@ -584,7 +743,7 @@ export function apply(ctx: Context, config: Config): void {
    * Reads taken while a turn is in flight always parse the log, so a recovering
    * client never receives a snapshot older than the turn it is waiting for.
    */
-  const readHistory = async (sessionId: string): Promise<Array<{ role: string; text: string }>> => {
+  const readHistory = async (sessionId: string): Promise<HistoryMessage[]> => {
     if (!isGuestSessionId(sessionId)) throw new Error('unknown session')
     if (!activeTurns.has(sessionId)) {
       const cached = historyCache.get(sessionId)
@@ -599,6 +758,60 @@ export function apply(ctx: Context, config: Config): void {
       }
     }
     return messages
+  }
+
+  /**
+   * 真机回传端点（O3）：访客端把渲染期实测结论送回来，主机侧**只记录、不做放行**
+   * （C0）。回传失败绝不影响访客——前端 fire-and-forget 吞异常，这里同样只回 JSON。
+   */
+  const handleRenderReport = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+    const raw = await readBody(req, 8 * 1024)
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      sendJson(res, 400, { error: 'invalid JSON body' })
+      return
+    }
+    const report = parsed as Partial<{
+      sessionId: string
+      blockId: string
+      blockType: string
+      reason: string
+      sourceDigest: string
+      sourceBytes: number
+      occurredAt: number
+      outcome: string
+    }> | null
+    if (report === null || typeof report !== 'object') {
+      sendJson(res, 400, { error: 'invalid report' })
+      return
+    }
+    const blockType = report.blockType === 'image' || report.blockType === 'chart' || report.blockType === 'html' || report.blockType === 'mermaid'
+      ? report.blockType
+      : undefined
+    const reason = typeof report.reason === 'string' ? report.reason : ''
+    const outcome = report.outcome === 'passed' ? 'passed' : 'degraded'
+    const accepted = gate?.acceptedReasons() ?? new Set<string>()
+    // 失败回传的原因必须落在 O2 冻结枚举内；**成功回传没有失败原因**（空串），
+    // 因此要显式放行——否则前端补的成功回传会被这里 400 拒掉，F-4 链路等于没接。
+    const reasonAccepted = outcome === 'passed' ? reason === '' : accepted.has(reason)
+    if (blockType === undefined || !reasonAccepted || typeof report.blockId !== 'string' || report.blockId === '') {
+      sendJson(res, 400, { error: 'invalid report fields' })
+      return
+    }
+    const sessionId = typeof report.sessionId === 'string' ? report.sessionId : ''
+    const applied = gate?.recordReport({
+      sessionId,
+      blockId: report.blockId,
+      blockType,
+      reason,
+      sourceDigest: typeof report.sourceDigest === 'string' ? report.sourceDigest : '',
+      sourceBytes: Number.isFinite(report.sourceBytes) ? Number(report.sourceBytes) : 0,
+      occurredAt: Number.isFinite(report.occurredAt) ? Number(report.occurredAt) : Date.now(),
+      outcome: report.outcome === 'passed' ? 'passed' : 'degraded',
+    }) ?? false
+    sendJson(res, 202, { ok: true, applied })
   }
 
   ctx.webServer.register({
@@ -618,6 +831,19 @@ export function apply(ctx: Context, config: Config): void {
           sendJson(res, 201, { sessionId, version: serviceVersion })
           return
         }
+        // 访客点「新对话」：回收旧会话的内存占用（agent 与流订阅），并丢弃历史缓存。
+        // 只有运行中的会话需要 dispose；已回收/未知会话按幂等成功处理。
+        if (req.method === 'DELETE' && path === '/api/guest/session') {
+          const closing = url.searchParams.get('sessionId') ?? ''
+          if (!isGuestSessionId(closing)) {
+            sendJson(res, 400, { error: 'invalid sessionId' })
+            return
+          }
+          await dropGuest(closing)
+          historyCache.delete(closing)
+          sendJson(res, 200, { closed: closing })
+          return
+        }
         if (req.method === 'GET' && path === '/api/guest/history') {
           const sessionId = url.searchParams.get('sessionId') ?? ''
           if (!isGuestSessionId(sessionId)) {
@@ -630,6 +856,10 @@ export function apply(ctx: Context, config: Config): void {
           } catch {
             sendJson(res, 404, { error: 'session not found' })
           }
+          return
+        }
+        if (req.method === 'POST' && path === '/api/guest/render-report') {
+          await handleRenderReport(req, res)
           return
         }
         if (req.method === 'POST' && path === '/api/guest/chat') {
@@ -652,11 +882,21 @@ export function apply(ctx: Context, config: Config): void {
             return
           }
           try {
-            const result = await runChat(sessionId, message, lang)
+            const result = await runChat(sessionId, message, lang, requestOrigin(req))
+            // 非流式出口的终端形态与 SSE 的 `done` 一致：reply + sources + 结构化块 + 门禁配置。
+            const gated = await gateFullReply(sessionId, result.reply, lang, requestOrigin(req))
+            const body = {
+              reply: gated.reply,
+              sources: gated.sources,
+              blocks: gated.blocks,
+              blockResults: gated.blockResults,
+              degradedIds: gated.degradedIds,
+              gate: gateConfig(),
+            }
             if (admission !== null && admission.kind === 'warn') {
-              sendJson(res, 200, { ...result, notice: admission.notice })
+              sendJson(res, 200, { ...body, notice: admission.notice })
             } else {
-              sendJson(res, 200, result)
+              sendJson(res, 200, body)
             }
           } catch (error) {
             sendJson(res, 500, { error: error instanceof Error ? error.message : 'turn failed' })
@@ -695,13 +935,35 @@ export function apply(ctx: Context, config: Config): void {
           const sendEvent = (event: string, data: unknown): void => {
             res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
           }
-          sendEvent('meta', { sessionId, version: serviceVersion })
+          sendEvent('meta', { sessionId, version: serviceVersion, gate: gateConfig() })
           if (warnNotice !== null) sendEvent('notice', { text: warnNotice })
           try {
-            const result = await runChatStream(sessionId, message, lang, (delta) => {
-              sendEvent('delta', { text: delta })
+            const result = await runChatStream(sessionId, message, lang, requestOrigin(req), event => {
+              // 门禁事件直接映射为 SSE：文字 `delta` 照常逐帧，图形块为结构化载荷
+              // （`block-open` 占位 → `block` 裁决）。坏块因此在任何时刻都不会以
+              // delta 形式流出（口径 B）；v3.2 删除事后重写后不再有 `block-replace`。
+              if (event.type === 'text') {
+                sendEvent('delta', { text: String(event.text ?? '') })
+                return
+              }
+              if (event.type === 'block-open') {
+                sendEvent('block-open', { blockId: event.blockId, blockType: event.blockType })
+                return
+              }
+              if (event.type === 'block') {
+                sendEvent('block', event.block ?? null)
+                return
+              }
             })
-            sendEvent('done', { reply: result.reply, sources: result.sources })
+            const payload = result.payload
+            sendEvent('done', {
+              reply: payload.reply,
+              sources: payload.sources,
+              blocks: payload.blocks,
+              blockResults: payload.blockResults,
+              degradedIds: payload.degradedIds,
+              gate: gateConfig(),
+            })
           } catch (error) {
             sendEvent('error', { error: error instanceof Error ? error.message : 'turn failed' })
           } finally {
