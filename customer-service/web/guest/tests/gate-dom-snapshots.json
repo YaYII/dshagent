@@ -185,7 +185,7 @@
   ],
   "t1Budget": {
     "inWindow": {
-      "latency": 496,
+      "latency": 495,
       "mermaid": "passed",
       "image": "passed"
     },

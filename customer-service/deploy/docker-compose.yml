@@ -26,6 +26,11 @@ services:
       CMD_API_KEY: ${CMD_API_KEY:-}
       CMD_API_KEY_2: ${CMD_API_KEY_2:-}
       NOOCOOL_API_KEY: ${NOOCOOL_API_KEY:-}
+      # 本地 LLM 中转（LiteLLM 网关，宿主 127.0.0.1:4000）的 master key。
+      # 网关把 Command Code / AgentRouter / NooCool 多上游聚合成一个
+      # OpenAI 兼容端点，profile 里以 provider `litellm` +
+      # baseURL http://llm-gateway:4000/v1 接入（见 cordis.patch.yml）。
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-}
     volumes:
       # 客服知识库（Obsidian vault 目录，只读）
       - ${KB_VAULT_DIR:-./kb}:/kb:ro
@@ -45,6 +50,12 @@ services:
     restart: unless-stopped
     networks:
       - dshagent
+      # 与本地 LiteLLM 网关共享的用户自定义网络：按容器名访问
+      # http://llm-gateway:4000。不能走 host.docker.internal —— 网关只把
+      # 4000 发布到宿主回环（-p 127.0.0.1:4000:4000），回环地址在容器里
+      # 不可达；而 Docker 默认 bridge 网络不做容器名解析，所以必须用
+      # 用户自定义网络（由 `llm-gateway start` 创建/挂载，见该脚本 NETWORK）。
+      - llm-shared
     extra_hosts:
       # 让容器内 profile 的 agentrouter baseURL（host.docker.internal:8787）
       # 能访问宿主机上运行的 AgentRouter 网关
@@ -69,3 +80,8 @@ volumes:
 networks:
   dshagent:
     driver: bridge
+  # 本地 LiteLLM 网关所在的共享网络（`llm-gateway start` 创建）。声明为
+  # external：由网关侧管理生命周期，客服 compose 只接入、不创建/销毁，
+  # 避免 `docker compose down` 把网关的网络一起拆掉。
+  llm-shared:
+    external: true

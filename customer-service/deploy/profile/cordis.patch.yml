@@ -110,10 +110,68 @@
               high: high
               max: max
 
+      # ── 本地 LLM 中转（LiteLLM 网关，宿主 127.0.0.1:4000）──────────────
+      # 网关把 Command Code / AgentRouter / NooCool 多家上游聚合成一个 OpenAI
+      # 兼容端点；同一 model_name 挂多个上游时自动分流+故障转移（网关
+      # config.yaml 的 routing_strategy: simple-shuffle）。对客服系统的价值：
+      # 某家额度用尽或被熔断时自动切下一家，访客不会因此拿到「暂时无法回答」。
+      #
+      # 地址用容器名而非宿主：网关只把 4000 发布到宿主回环
+      # （-p 127.0.0.1:4000:4000），容器里 host.docker.internal 到不了；两个
+      # 容器共享 llm-shared 用户自定义网络，按容器名 llm-gateway 解析
+      # （见 docker-compose.yml 的 networks 与 llm-gateway 脚本的 NETWORK）。
+      # 密钥走 LITELLM_MASTER_KEY（compose env_file 注入，不写进本文件）。
+      litellm:
+        displayName: 本地 LLM 中转 (LiteLLM)
+        api: openai-completions
+        apiKeyEnv: LITELLM_MASTER_KEY
+        baseURL: http://llm-gateway:4000/v1
+        compat:
+          supportsDeveloperRole: false
+        models:
+          # 网关暴露的 model_name，与直连 commandcode 时用的模型名相同，
+          # 因此切换 provider 不需要改 preset 或其它配置。
+          - id: deepseek/deepseek-v4.1-flash
+            name: DeepSeek V4.1 Flash (via LiteLLM)
+            contextWindow: 1000000
+            maxTokens: 384000
+            reasoningEfforts:
+              # 与上游实测一致：off 会被网关以 400 拒绝，故 off 映射成 null
+              # （不下发 reasoning_effort 字段），其余原样透传。
+              off: null
+              low: low
+              medium: medium
+              high: high
+              max: max
+          - id: deepseek-v4.1-flash
+            name: DeepSeek V4.1 Flash (LiteLLM 短名)
+            contextWindow: 1000000
+            maxTokens: 384000
+            reasoningEfforts:
+              off: null
+              low: low
+              medium: medium
+              high: high
+              max: max
+          - id: ds/deepseek-v4-pro
+            name: DeepSeek V4 Pro (via LiteLLM)
+            contextWindow: 1000000
+            maxTokens: 384000
+            reasoningEfforts:
+              off: null
+              low: low
+              medium: medium
+              high: high
+              max: max
+
 # ── 会话默认模型指向上面注册的路由 ─────────────────────────────────────────
+# 默认走本地 LLM 中转（provider litellm → http://llm-gateway:4000/v1）：同一
+# 模型名在网关侧挂多家上游，某家额度用尽/被熔断时自动切下一家，客服不会因此
+# 中断。回滚到直连只需把下面两行改回 provider: commandcode（模型名不变，
+# 两边都叫 deepseek/deepseek-v4.1-flash）。
 - id: agent-default-model
   config:
-    provider: commandcode
+    provider: litellm
     model: deepseek/deepseek-v4.1-flash
 
 # ── 会话标题的辅助模型上限 ─────────────────────────────────────────────────
@@ -170,7 +228,7 @@
         # 本次递增理由：输出前自审门禁落地（主机侧围栏状态机 + 三出口收口 + 前端块槽位渲染
         # 与表格/CRLF/NO_GATE 加固）。注意本值是**镜像构建戳**：改源码值不等于生效——须重建镜像，
         # 之后 /api/guest/health 的 version 才会反映新值；不重建则线上仍报旧值。
-        serviceVersion: '2026-09-11.14'
+        serviceVersion: '2026-09-11.15'
         # Customer-service Q&A is retrieval-grounded: pin a low reasoning
         # effort so one uncertain turn cannot burn ~15-20s on a long internal
         # reasoning chain before the first answer token reaches the visitor.
