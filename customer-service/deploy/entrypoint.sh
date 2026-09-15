@@ -34,6 +34,13 @@ install_preset customer-service-guest
 # ── 启动 ────────────────────────────────────────────────────────────────────
 cd /app
 echo "[dshagent] booting profile '$PROFILE_NAME' (DSH_HOME=$DSH_HOME)"
+# dsh web 会打印 `dsh web: http://127.0.0.1:3080/?token=…`，其中 3080 是**容器内**
+# 端口、127.0.0.1 是容器回环——两者都不能直接点。对外入口是宿主上的
+# ${ADMIN_PORT}（nginx 反代）。这里先说明怎么换算，省得看到 3080 那条以为打不开；
+# 想要现成的可点链接直接跑 deploy/admin-url.sh。
+echo "[dshagent] Admin 对外入口: http://<本机IP>:${ADMIN_PORT}/?token=<下一行 dsh web 输出里的 token>"
+echo "[dshagent] （下一行打印的 127.0.0.1:3080 是容器内地址，把端口换成 ${ADMIN_PORT} 即可；"
+echo "[dshagent]   或直接执行 bash $(dirname "$0")/admin-url.sh 打印可点链接）"
 exec node --import tsx apps/cli/src/bin.ts --profile "$PROFILE_NAME" \
   --no-open --host 127.0.0.1 --port "${DSH_PORT:-3080}" \
   ${DSH_EXTRA_ARGS:-}

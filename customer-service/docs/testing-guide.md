@@ -48,19 +48,29 @@ curl -s -X POST http://127.0.0.1:10800/api/guest/chat \
 
 ### 2.1 拿登录链接
 
-Admin 每次启动生成一次性 token，写在容器日志里：
+**直接跑脚本**（推荐，打印的就是能点开的地址）：
 
 ```sh
-docker logs dshagent-app 2>&1 | grep -o 'http://127.0.0.1:3080/?token=[A-Za-z0-9]*' | tail -1
+bash customer-service/deploy/admin-url.sh            # 用人能访问的网卡 IP
+bash customer-service/deploy/admin-url.sh 127.0.0.1  # 只要本机访问
 ```
 
-把输出里的 `127.0.0.1:3080` 换成 **`127.0.0.1:10801`** 再打开，例如：
+想手工取也行：
+
+```sh
+docker logs dshagent-app 2>&1 | grep -o 'http://127.0.0.1:3080/?token=[A-Za-z0-9_-]*' | tail -1
+```
+
+⚠️ **日志里那条 `127.0.0.1:3080` 不能直接点**——那是容器内地址（回环 + 容器内端口）。
+把主机与端口换成宿主上的 **10801** 才是对外入口，例如：
 
 ```
-http://127.0.0.1:10801/?token=5n8U85EtuIiWb8A7OMP3KYjbdIBGUeMeVXtcUuBQit8
+http://192.168.1.44:10801/?token=PjjMBdXLQUu9tNF_wzgT7JWzJUrNhzrl0C2Rwutmd7Y
 ```
 
-> token 每次重启都会变，旧链接失效就重新取一次。首次打开会弹测试公告，点 **Continue**。
+看到 **"dsh web authentication required; reopen the URL printed by dsh web"** 就是
+这两件事之一：① 点的是容器内 3080 那条；② 链接过期了（token 每次重启都重新生成）。
+重跑 `admin-url.sh` 即可。首次打开会弹测试公告，点 **Continue**。
 
 ### 2.2 在 Admin 里跟「客服助手」对话（自己测 Agent）
 
@@ -168,6 +178,8 @@ node /home/as-workstation01/Documents/project/dshagent/customer-service/web/gues
 | 改了 nginx.conf 不生效 | nginx.conf 是单文件挂载，需 `docker compose up -d --force-recreate nginx` |
 | 两个端口突然都连不上（`http=000`）但容器都是 Up | 多半是**只重启了 `dshagent-app`**：nginx 用 `network_mode: service:dsh-agent` 共享网络命名空间，dsh-agent 一重启，nginx 还挂在旧命名空间上，两个端口一起废。修：`docker compose up -d --force-recreate nginx`。**改配置请整组 `docker compose up -d`，别用 `docker restart dshagent-app`** |
 | Admin 里点工作区/预设没反应、不出现输入框 | 没有注册工作区（新建会话必须有工作区）。见 §2.2 添加一个；工作区存在 `dsh-home` 卷里，重启不丢 |
+| Admin 提示 "dsh web authentication required" | 点的是容器内地址（`127.0.0.1:3080`），或 token 过期。跑 `bash customer-service/deploy/admin-url.sh` 拿新链接 |
+| 想换客服的底层模型 / 换免费模型 | `bash customer-service/deploy/model.sh list\|current\|free\|paid`，**立即生效不用重启**。见 `docs/model-management.md` |
 
 排错时开容器日志实时看：
 
