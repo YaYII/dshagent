@@ -388,7 +388,9 @@
      又持续上报新高度，两者会叠成无限增长的抖动（实测每 100ms 涨 2px）。 */
   .bubble .html-frame {
     display: block; width: 100%; border: 0; background: var(--paper);
-    height: clamp(180px, 42vh, 520px);
+    /* 首帧占位：等子文档回传内容高度前的临时值。取小一点——矮卡片不会先闪一大块
+       空白，高卡片会平滑长高（测量在 load 后立刻回传，通常 <100ms）。 */
+    height: clamp(120px, 22vh, 300px);
   }
   .bubble img, .bubble .mermaid-src.mermaid-done { cursor: zoom-in; }
 
@@ -1359,7 +1361,10 @@
   const HTML_PREVIEW_CSS = `
     :root { color-scheme: light; }
     *, *::before, *::after { box-sizing: border-box; }
-    html { max-width: 100%; }
+    html { max-width: 100%; height: auto; }
+    /* 模型常写 body{height:100%} / html,body{height:100%}；在 iframe 里那等于
+       「撑满视口」，会把内容高度量成整屏。这里锁成内容驱动。 */
+    html, body { min-height: 0; }
     body { margin: 0; padding: 12px 14px; max-width: 100%; overflow-x: auto; background: #fff; color: #1f2937;
       font: 14px/1.65 "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", system-ui, -apple-system, "Segoe UI", sans-serif; }
     /* 顶层元素占满可用宽度（自带的 max-width 仍生效并居中），窄屏自动变成单列 */
@@ -1514,9 +1519,18 @@
    * 它一次 postMessage 的机会——所以只放行这一段由本页写入的脚本（CSP 用随机
    * nonce 锁定），模型自己写的脚本/内联事件仍被 CSP 拒绝执行。
    */
+  // 量的是**内容盒**高度（getBoundingClientRect），不是 documentElement.scrollHeight。
+  // 根元素的 scrollHeight 至少等于 iframe 的视口高度，而视口高度正是父页面刚设的值——
+  // 用它当内容高度会形成「父设高 → 子报该高 → 父再设高」的只增不减棘轮（实测：110px
+  // 的单行卡片被一路顶到 850px，740px 全是空白）。rect 高度是内容驱动的，可增可减。
   const HTML_HEIGHT_REPORTER = 'addEventListener("load",function(){'
-    + 'var last=0;'
-    + 'function report(){var h=document.documentElement.scrollHeight;if(h===last)return;last=h;'
+    + 'var last=-1;'
+    + 'function measure(){'
+    + 'var de=document.documentElement,b=document.body;'
+    + 'var a=de?de.getBoundingClientRect().height:0;'
+    + 'var c=b?b.getBoundingClientRect().height:0;'
+    + 'return Math.ceil(Math.max(a,c))}'
+    + 'function report(){var h=measure();if(h<=0||h===last)return;last=h;'
     + 'parent.postMessage({dshHtmlHeight:h},"*")}'
     + 'report();addEventListener("resize",report);'
     + 'if(window.ResizeObserver){new ResizeObserver(function(){'
@@ -1554,12 +1568,17 @@
     const content = Number(frame.dataset.contentHeight || 0)
     if (!content) return
     const max = Math.min(Math.round(window.innerHeight * 0.85), 900)
-    const target = Math.min(Math.max(content + 2, 120), max)
+    // 目标高度直接取内容高度：这里**不能**写成 content + 2——子文档每轮上报的都是
+    // 「当前内容高度」，再叠加 2px 会让高度在每轮上报里累加，一路顶到上限才停。
+    // 允许收缩（target < 当前高度时照样写回），否则内容变短后空白永远留着。
+    // 下限只防退化（内容量成 0 时别塌成 0），不当作「最小观感高度」：设成 120px 时
+    // 一张 84px 的单行卡片会被垫出 36px 空白，正是「容器里一堆空白」的来源。
+    const target = Math.min(Math.max(content, 56), max)
     // 小于 2px 的变化忽略：亚像素级来回会把「测量 → 设高 → 再测量」变成抖动
     if (Math.abs(target - Number(frame.dataset.appliedHeight || 0)) < 2) return
     frame.dataset.appliedHeight = String(target)
     frame.style.height = `${target}px`
-    frame.dataset.clamped = content + 2 > max ? '1' : ''
+    frame.dataset.clamped = content > max ? '1' : ''
   }
 
   /**
