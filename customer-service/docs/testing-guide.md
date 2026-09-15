@@ -166,6 +166,8 @@ node /home/as-workstation01/Documents/project/dshagent/customer-service/web/gues
 | 会话标题变成半截句子 | 容器日志搜 `title output reached maxOutputTokens`；网关强制思考，`session-title-llm.maxOutputTokens` 要够大（当前 512） |
 | 合約/账单查不到 | 见 `docs/cem-ai-api-verification.md`：`withAddress` 只认 `1/0`、`level=3` 会超时、不存在的合約号返回 500 |
 | 改了 nginx.conf 不生效 | nginx.conf 是单文件挂载，需 `docker compose up -d --force-recreate nginx` |
+| 两个端口突然都连不上（`http=000`）但容器都是 Up | 多半是**只重启了 `dshagent-app`**：nginx 用 `network_mode: service:dsh-agent` 共享网络命名空间，dsh-agent 一重启，nginx 还挂在旧命名空间上，两个端口一起废。修：`docker compose up -d --force-recreate nginx`。**改配置请整组 `docker compose up -d`，别用 `docker restart dshagent-app`** |
+| Admin 里点工作区/预设没反应、不出现输入框 | 没有注册工作区（新建会话必须有工作区）。见 §2.2 添加一个；工作区存在 `dsh-home` 卷里，重启不丢 |
 
 排错时开容器日志实时看：
 
