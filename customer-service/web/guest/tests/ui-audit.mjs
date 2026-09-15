@@ -132,6 +132,31 @@ for (const w of [1280, 768, 390]) {
   if (overflow) bad += 1
 }
 
+// 中文行宽：中英混排的舒适区是每行 30–45 个汉字。字号或版心一改就会飘，
+// 所以纳入审计（用注入长文本逼出最坏情况，而不是看当前这条短回答）。
+// 必须先切回桌面宽度：上面的溢出检查把视口留在了 390px，手机上一行 20 字是正常的，
+// 拿那个数字判「太窄」只会误报（这个顺序坑我踩了一次）。
+await page.setViewportSize({ width: 1440, height: 900 })
+await page.waitForTimeout(500)
+const lineWidth = await page.evaluate(() => {
+  const host = document.getElementById('chat')
+  if (!host) return null
+  const wrap = document.createElement('div'); wrap.className = 'msg assistant'
+  const bub = document.createElement('div'); bub.className = 'bubble'
+  bub.innerHTML = '<p>' + '這是一段用來測量中文行寬的長文字，'.repeat(12) + '</p>'
+  wrap.appendChild(bub); host.appendChild(wrap)
+  const cs = getComputedStyle(bub); const r = bub.getBoundingClientRect()
+  const inner = r.width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
+  const fs = parseFloat(cs.fontSize)
+  const out = { cjkPerLine: Math.round(inner / fs), innerWidth: Math.round(inner), fontSize: fs }
+  wrap.remove(); return out
+})
+if (lineWidth !== null) {
+  const okWidth = lineWidth.cjkPerLine >= 28 && lineWidth.cjkPerLine <= 46
+  console.log(`中文行宽: 最坏每行 ${lineWidth.cjkPerLine} 字（内容宽 ${lineWidth.innerWidth}px，字号 ${lineWidth.fontSize}px）${okWidth ? ' ✓ 舒适区 28–46' : ' ✗ 超出舒适区'}`)
+  if (!okWidth) bad += 1
+}
+
 await page.screenshot({ path: '/tmp/admin-shots/ui-light.png', fullPage: false })
 await page.locator('#themeToggle').click()
 await page.waitForTimeout(900)

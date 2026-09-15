@@ -70,9 +70,9 @@
       "Liberation Mono", monospace;
     /* 流体字阶：小屏到宽屏连续过渡，不靠断点跳变 */
     --t-meta: 10.5px;
-    --t-sm: clamp(12.5px, 12.2px + .1vw, 13.5px);
-    --t-base: clamp(14px, 13.6px + .18vw, 15.5px);
-    --t-lg: clamp(16px, 15px + .5vw, 19px);
+    --t-sm: clamp(13.5px, 13.2px + .12vw, 14.5px);
+    --t-base: clamp(15.5px, 15.1px + .2vw, 17px);
+    --t-lg: clamp(17px, 16px + .5vw, 20px);
     --d-2: clamp(19px, 2.6vw, 27px);
     --d-1: clamp(26px, 4.2vw, 44px);
     /* 字距阶梯：大标题收紧、小标签放开，是「设计感」最省力的来源 */
@@ -89,9 +89,10 @@
     --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px;
     --s5: 24px; --s6: 32px; --s7: 48px; --s8: 64px;
     /* 圆角 */
-    --r-xs: 6px; --r-sm: 10px; --r: 14px; --r-lg: 20px; --r-pill: 999px;
-    /* 版心：正文阅读宽度，避免长行 */
-    --measure: 68rem;
+    --r-xs: 5px; --r-sm: 8px; --r: 11px; --r-lg: 16px; --r-pill: 999px;
+    /* 版心：正文阅读宽度。68rem 对拉丁文合适，对中文太长——实测最坏每行 54 个
+       中文字（舒适区 30–45）。收到 53rem 后最坏约 42 字/行。 */
+    --measure: 53rem;
     /* 动效 */
     --ease: cubic-bezier(.22, .61, .36, 1);
     --dur-1: 140ms; --dur-2: 240ms; --dur-3: 420ms;
@@ -139,6 +140,13 @@
     display: flex; flex-direction: column; height: 100%;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
+  }
+  /* 顶部品牌线：CTM 那种整条品牌色导航的克制版——一条 2px 主色线，
+     给页面一个「官方出品」的锚点，又不抢内容注意力。 */
+  body::after {
+    content: ''; position: fixed; top: 0; left: 0; right: 0; height: 2px;
+    z-index: 40; pointer-events: none;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2) 55%, transparent);
   }
   /* 画布底纹：极淡的网格 + 顶部青绿光晕。不用图片，纯 CSS，零请求。 */
   body::before {
