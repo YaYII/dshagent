@@ -153,6 +153,32 @@
               medium: medium
               high: high
               max: max
+          # ── 免费/低成本档：用于「免费模型能不能正常干活」的实测 ────────────
+          # 两者都实测可用（普通问答 + 工具调用 finish=tool_calls、参数正确），
+          # 且在 Admin 的模型选择器里可直接切换，用于与付费档对比。
+          # 注意：它们同样**强制思考**——实测给 80 token 时推理段就吃光配额、
+          # 正文为空（finish=length）；给 700 token 才稳定出正文。
+          # 因此任何按「不思考模型」估算的小 max_tokens 都会失败。
+          - id: ar/deepseek-v4-flash
+            name: DeepSeek V4 Flash (免费档 · AgentRouter)
+            contextWindow: 1000000
+            maxTokens: 384000
+            reasoningEfforts:
+              off: null
+              low: low
+              medium: medium
+              high: high
+              max: max
+          - id: deepseek-v4-flash
+            name: DeepSeek V4 Flash (网关聚合名)
+            contextWindow: 1000000
+            maxTokens: 384000
+            reasoningEfforts:
+              off: null
+              low: low
+              medium: medium
+              high: high
+              max: max
           - id: ds/deepseek-v4-pro
             name: DeepSeek V4 Pro (via LiteLLM)
             contextWindow: 1000000
@@ -169,6 +195,12 @@
 # 模型名在网关侧挂多家上游，某家额度用尽/被熔断时自动切下一家，客服不会因此
 # 中断。回滚到直连只需把下面两行改回 provider: commandcode（模型名不变，
 # 两边都叫 deepseek/deepseek-v4.1-flash）。
+#
+# 想换免费档：把 model 改成 `ar/deepseek-v4-flash`（AgentRouter 免费档）。实测该
+# 档在真实客服流程里全部正常：知识库检索并给出处、合约核对走 lookup_* 工具、
+# mermaid/html 块 render/passed、面对「我有哪些合約」照样拒绝枚举。免费档只有
+# 一个上游、没有故障转移，故默认仍用付费多上游；两档都已注册在 provider 的模型
+# 列表里，Admin 的模型选择器可直接切换对比，不必重新部署。
 - id: agent-default-model
   config:
     provider: litellm
@@ -228,7 +260,7 @@
         # 本次递增理由：输出前自审门禁落地（主机侧围栏状态机 + 三出口收口 + 前端块槽位渲染
         # 与表格/CRLF/NO_GATE 加固）。注意本值是**镜像构建戳**：改源码值不等于生效——须重建镜像，
         # 之后 /api/guest/health 的 version 才会反映新值；不重建则线上仍报旧值。
-        serviceVersion: '2026-09-11.15'
+        serviceVersion: '2026-09-11.17'
         # Customer-service Q&A is retrieval-grounded: pin a low reasoning
         # effort so one uncertain turn cannot burn ~15-20s on a long internal
         # reasoning chain before the first answer token reaches the visitor.
