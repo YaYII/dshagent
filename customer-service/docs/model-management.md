@@ -55,7 +55,37 @@ tail -1 ~/ai-gateway/ua-log.jsonl     # 网关侧记录本轮实际用的模型
 > `/dsh-home/settings.yaml` 追加 `agent-default-model:`，文件改了但访客端仍然走旧
 > 模型（网关日志可证）。设置 provider 有自己的写入路径，**必须走 RPC/界面**。
 
-## 四、免费档实测结论
+## 四、为什么默认是 v4.1 flash（稳定性链）
+
+客服默认 `litellm / deepseek/deepseek-v4.1-flash`。这个名字在网关侧不是「一个模型」，
+而是一条**带故障转移的链**（`~/ai-gateway/config.yaml`）：
+
+```
+deepseek/deepseek-v4.1-flash          ← 客服用的模型名
+  └─ router.model_group_alias
+       deepseek/deepseek-v4.1-flash → deepseek-v4.1-flash
+       └─ Command Code 账号池
+            主账号 weight=1000、后备 weight=1（用权重逼近顺序使用）
+            为什么不用随机分流：prompt cache 按账号隔离，分散会让各账号都命中不了
+            缓存，输入按 $0.15/M 计（缓存价 $0.003/M，差 50 倍）→ 额度烧得更快
+            └─ router.fallbacks
+                 deepseek-v4.1-flash → ["deepseek-v4-flash"]
+                 （v4.1 目前只有 Command Code 一家提供，所以留了第三方兜底）
+```
+
+关键参数（都是踩过坑才定的，别随手改）：
+
+| 参数 | 值 | 为什么 |
+|---|---|---|
+| `cooldown_time` | **600**（不是 3600） | 3600 的教训：一次瞬时限流被锁 1 小时，解锁后再撞一次又锁 1 小时，把「几分钟的限流」放大成「全天不可用」。600 让它几分钟自愈 |
+| `RateLimitErrorAllowedFails` | 0 | 429 = 账号额度用尽，立即熔断，别继续往这个账号打 |
+| `BadRequestErrorAllowedFails` | 10 | 400 是客户端参数问题，惩罚上游会把健康账号误冷却 |
+| `InternalServerErrorAllowedFails` | 10 | 500（含 AgentRouter 的敏感词拦截）是单请求问题，冷却整个部署 1 小时毫无益处 |
+
+**结论**：默认就该是 v4.1 flash——它背后是多账号池 + 第三方兜底；而免费档
+（`ar/deepseek-v4-flash`）只有一个上游，没有这层保护。要压成本再切免费，接受单点。
+
+## 五、免费档实测结论
 
 AgentRouter 免费档（`ar/deepseek-v4-flash`）跑真实客服流程，四类任务全部正常：
 
@@ -73,7 +103,7 @@ AgentRouter 免费档（`ar/deepseek-v4-flash`）跑真实客服流程，四类�
 2. 免费档同样**强制思考**：给 80 token 时推理段就吃光配额、正文为空
    （`finish_reason=length`），700 token 才稳定出正文。
 
-## 五、Admin 界面里怎么改（不跑脚本时）
+## 六、Admin 界面里怎么改（不跑脚本时）
 
 1. **管理 provider / 密钥 / 模型清单**：设置 → **模型** → 每个 provider 右侧「编辑」，
    或「添加自定义提供方」。API key 存在 DSH 的凭据库（`dsh-home`），不写进仓库。
