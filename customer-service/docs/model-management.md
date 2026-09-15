@@ -4,6 +4,30 @@
 AgentRouter / NooCool 聚合成一个 OpenAI 兼容端点，同一模型名挂多个上游做故障转移。
 客服侧只认 provider `litellm`，具体走哪家由网关决定。
 
+## 〇、两层拓扑（先分清这个，否则会误判「已经不用 Command Code 了」）
+
+```
+访客/Admin
+   │
+   ▼  第一层：客服 → 本地中转（provider = litellm）
+本地 LiteLLM 网关  http://llm-gateway:4000/v1
+   │
+   ▼  第二层：中转 → 上游（由网关配置决定）
+Command Code（主力）/ AgentRouter（v4 兜底）/ NooCool / DeepSeek 官方
+```
+
+**第一层确实已经没有直连了**：客服默认 provider 是 `litellm`，客服容器没有任何公网
+出站连接（实测 `/proc/net/tcp` 里非内网连接数为 0），所有模型请求都发给本地网关。
+
+**但第二层仍然是 Command Code 在干活**：`deepseek/deepseek-v4.1-flash` 经别名落到
+`deepseek-v4.1-flash`，其 `api_base` 就是 `https://api.commandcode.ai/provider/v1`。
+**v4.1 flash 只有 Command Code 一家提供**，中转站没换掉它，只是替客服去调它。
+第三方那几家是 v4 的兜底，只在 v4.1 整个账号池挂掉时才接手。
+
+> 客服 profile 里仍声明了 `commandcode` / `agentrouter` / `noocool` 三个 provider，
+> 它们只在 Admin 的模型选择器里可选（应急切换用），默认路由不走。
+> 要彻底断掉某个 provider，直接从 `apiAllowlist` 那几行删掉即可。
+
 ## 一、三个层级，别混用
 
 | 层级 | 改什么 | 在哪改 | 生效范围 |
