@@ -171,6 +171,16 @@ ok('lookup 的 keyedBy 是 contract_no', yml.includes('keyedBy: contract_no'))
 ok('keyedBy 有格式约束', yml.includes("valuePattern: '[0-9]{10}'"))
 ok('字段白名单不含 name', !/^\s+-\s+name$/m.test(yml.split('apiLookupFields:')[1]?.split('apiLookup:')[0] ?? ''))
 ok('提示词要求先问合约号', yml.includes('第一步永遠是問合約號'))
+
+// 账单 level 的约束：业务方指定只用 1 与 5（2/3/4 不用），且 5 带付款码。
+// 这几条都是「改了没人发现」的类型，所以锚在配置与提示词的事实上。
+const billQuery = (yml.split('name: bill')[1] ?? '').split('- name:')[0]
+ok('bill 查询固定 level=5（付款码档）', /level:\s*'5'/.test(billQuery), billQuery.trim().slice(0, 90))
+ok('bill 不固定 level=1（已按要求改用 5）', !/level:\s*'1'/.test(billQuery))
+const billFields = (yml.split('bill:')[1] ?? '').split('apiLookup:')[0]
+ok('付款码 barcode 在字段白名单里（否则开了 level=5 也被裁掉）', /^\s+-\s+barcode\s*$/m.test(billFields))
+ok('提示词说明 level 只用 1 与 5', yml.includes('2／3／4 不要用'))
+ok('提示词要求主动教访客用付款码缴费', yml.includes('截圖／保存這個付款碼') && yml.includes('微信或支付寶'))
 ok('提示词禁止报出总数', yml.includes('您名下共有 N 張合約'))
 
 globalThis.fetch = originalFetch

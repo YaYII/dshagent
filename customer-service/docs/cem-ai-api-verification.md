@@ -76,7 +76,7 @@ AMIDisconType
 | 不传 | ✅ 24 键 |
 | `level=1` | ✅ 24 键（与不传相同） |
 | `level=2` | ✅ 25 键（多 `disconnectionStatus`） |
-| `level=5` | ✅ 25 键（多 `installationAddress`、`streetName`、`buildingName`） |
+| `level=5` | ✅ 25 键（多 **`barcode` 付款码**） |
 | `level=3` | ❌ 25 s 无响应（超时） |
 | `withAddress=true` | ❌ HTTP 422 |
 | `withAddress=false` | ❌ HTTP 422 |
@@ -91,11 +91,20 @@ AMIDisconType
  "data":{"withAddress":["The with address field must be true or false."]}}
 ```
 
-规范写的是 `withAddress: true|false`，但网关的布尔校验不认 `true`/`false`，只认 `1`/`0`
-——校验文案与实际行为互相矛盾，属后端参数映射缺陷。
+规范写的是 `withAddress: true|false`，但网关的布尔校验**不认 `true`/`false`**（HTTP 422
+`The with address field must be true or false.`），**只认 `1`/`0`**——校验文案与实际行为
+互相矛盾，属后端参数映射缺陷。当前客服不使用 `withAddress`：访客问合约/账单不需要地址，
+而地址字段后端已脱敏（`****, 3 樓 C`），要用时在 `apiLookup.bill.fixedQuery` 加
+`withAddress: '1'` 并把三个地址字段加入白名单即可。
 
 **因此 preset 里只使用实测可用的形式**：`level=1|2|5`，不传 `withAddress`。
-`level=5` 已能拿到地址，需要地址时用它即可。
+**可用档位由业务方指定为 `level=1` 与 `level=5`；2／3／4 不要使用**（`level=3` 实测超时，
+2／4 业务方明确不用）。`level=5` 的价值是多回 **付款码 `barcode`**，访客可据此缴费。
+
+> ⚠️ 修正一处早前的记录错误：本文档曾写「`level=5` 会多回 installationAddress /
+> streetName / buildingName」。**这是错的**——实测 `level=5` 只多回 `barcode`（24 → 25 键）；
+> 地址字段是 `withAddress` 单独控制的（`withAddress=1` → 27 键，多三个地址字段，
+> 且后端已做脱敏如 `****, 3 樓 C`）。
 
 ## 4. 后端缺陷：不存在的合约号返回 500 + 722 KB HTML
 
