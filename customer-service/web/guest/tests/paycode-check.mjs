@@ -8,9 +8,13 @@
  * 判据：
  *   A. 码表取自权威实现（107 项，STOP = 1100011101011）；
  *   B. 编码器：数字串走 C 集，校验和正确（用规范样例独立复算）；
- *   C. 浏览器实测：渲染出的 SVG 解码后 == 原始付款码（端到端，含静区与模块宽度）；
+ *   C. 浏览器实测：渲染出的一维条码 **与二维码** 都解码回原始付款码（端到端，含静区与模块宽度）；
  *   D. 扫码硬要求：左右静区 ≥10 模块、模块 ≥2px、纯黑条纯白底；
  *   E. 非付款码内容不会被误装饰（纯数字 20–40 位才处理）。
+ *
+ * 为什么一维码与二维码**都要**：账单接口的字段叫 `barcode`（一维条码，账单上印的
+ * 就是它），而缴费入口（微信/支付宝一类的扫码）通常按二维码识别。两个码图内容同源，
+ * 访客截哪个能被认就用哪个，旁边还有可复制的数字。
  *
  * 运行：node customer-service/web/guest/tests/paycode-check.mjs
  */
@@ -18,6 +22,7 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import { decodeQrSvg } from './qr-decode.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const INDEX = join(HERE, '..', 'index.html')
@@ -162,7 +167,9 @@ if (!reachable) {
     const codes = [...document.querySelectorAll('.bubble pre > code')].map(c => (c.textContent || '').trim())
     return {
       cards: cards.length,
-      svg: cards[0] ? (cards[0].querySelector('svg')?.outerHTML ?? '') : '',
+      svg: cards[0] ? (cards[0].querySelector('.paycode-bars svg')?.outerHTML ?? '') : '',
+      qr: cards[0] ? (cards[0].querySelector('.paycode-qr svg')?.outerHTML ?? '') : '',
+      qrCaption: cards[0] ? (cards[0].querySelector('.paycode-qr + .paycode-caption')?.textContent ?? '') : '',
       // 卡片插在它对应的代码块之后：访客看到的数字就是这一块。
       shownCode: cards[0] ? (cards[0].previousElementSibling?.textContent ?? '').trim() : '',
       copyLabel: cards[0] ? (cards[0].querySelector('.paycode-copy')?.textContent ?? '') : '',
@@ -196,7 +203,70 @@ if (!reachable) {
       `条码 "${decoded.text}" vs 页面 "${dom.shownCode}"`)
     ok('C. 解码结果与业务系统接口一致', decoded.text === SAMPLE,
       `解出 "${decoded.text}"，接口给的是 "${SAMPLE}"`)
+
+    // ── 二维码：判据是「真的解一次」而不是「矩阵与另一个实现逐格相同」──
+    // 掩码由编码器自行择优，实现之间可以合法地选出不同掩码（实测 JS 与 Python
+    // 的 qrcode 差 116 格但都能扫），所以只有解码才是硬判据。
+    const qr = decodeQrSvg(dom.qr)
+    console.log(`   二维码解码：${qr.error ? '失败 ' + qr.error : `"${qr.text}" ${qr.count}×${qr.count} 模块 ${qr.module}px 静区 ${qr.quiet}`}`)
+    ok('E. 卡片里有二维码（缴费入口按二维码识别）', dom.qr !== '', `qr svg 长度 ${dom.qr.length}`)
+    ok('E. 二维码带用途标签', dom.qrCaption !== '', `"${dom.qrCaption}"`)
+    ok('C. 二维码解码回原始付款码', qr.text === SAMPLE, `解出 "${qr.text}"`)
+    ok('C. 二维码内容 == 页面上给访客看的数字', qr.text === dom.shownCode,
+      `二维码 "${qr.text}" vs 页面 "${dom.shownCode}"`)
+    ok('C. 二维码与一维条码内容一致（两个码图同源）', qr.text === decoded.text,
+      `二维码 "${qr.text}" vs 条码 "${decoded.text}"`)
+    ok('D. 二维码静区 ≥4 模块（规范要求，否则扫不到）', (qr.quiet ?? 0) >= 4, `quiet=${qr.quiet}`)
+    ok('D. 二维码模块 ≥4px（截图后可扫）', (qr.module ?? 0) >= 4, `${qr.module}px`)
   }
+
+  // ── G. 卡片自身不能引入可读性/布局问题（我在页面上新加的组件，得自己举证）──────
+  // 两件事只能实测：小标签的文字对比度（半透明小字最容易不达标）、窄屏是否横向溢出。
+  const cardAudit = await host.evaluate(() => {
+    const card = document.querySelector('.paycode')
+    if (!card) return { error: '没有卡片' }
+    const caption = card.querySelector('.paycode-caption')
+    const cs = getComputedStyle(caption)
+    const parse = v => (v.match(/[\d.]+/g) || []).slice(0, 3).map(Number)
+    // 卡片背景可能是半透明叠加：把卡片自身背景再与父级合成，取实际观感色
+    const cardBg = getComputedStyle(card).backgroundColor
+    const alphaOf = v => (v.match(/[\d.]+/g) || [])[3]
+    const over = (fg, bg, a) => fg.map((c, i) => Math.round(c * a + bg[i] * (1 - a)))
+    const ink = parse(cs.color)
+    const cardRgb = parse(cardBg)
+    const paper = alphaOf(cardBg) !== undefined && Number(alphaOf(cardBg)) < 1
+      ? over(cardRgb, [255, 255, 255], Number(alphaOf(cardBg)))
+      : cardRgb
+    const composited = over(ink, paper, Number(cs.opacity === '' ? 1 : cs.opacity))
+    const lin = c => { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4) }
+    const lum = ([r, g, b]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+    const [hi, lo] = [lum(composited), lum(paper)].sort((x, y) => y - x)
+    return {
+      contrast: (hi + 0.05) / (lo + 0.05),
+      caption: (caption.textContent || '').trim(),
+    }
+  })
+  console.log(`   小标签 "${cardAudit.caption}" 对比度 ${cardAudit.contrast?.toFixed(2)}:1`)
+  ok('G. 码图标签对比度 ≥4.5:1（半透明小字最容易不达标）',
+    (cardAudit.contrast ?? 0) >= 4.5, `${cardAudit.contrast?.toFixed(2)}:1`)
+
+  await host.setViewportSize({ width: 390, height: 900 })
+  await host.waitForTimeout(600)
+  const narrow = await host.evaluate(() => {
+    const card = document.querySelector('.paycode')
+    const bubble = card?.closest('.bubble')
+    if (!card || !bubble) return { error: '没有卡片' }
+    return {
+      cardOverflow: card.scrollWidth - card.clientWidth,
+      bubbleOverflow: bubble.scrollWidth - bubble.clientWidth,
+      pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    }
+  })
+  console.log(`   390px 窄屏：卡片溢出 ${narrow.cardOverflow}px，气泡溢出 ${narrow.bubbleOverflow}px，页面溢出 ${narrow.pageOverflow}px`)
+  ok('G. 390px 窄屏下卡片与页面都不横向溢出',
+    (narrow.cardOverflow ?? 99) <= 1 && (narrow.bubbleOverflow ?? 99) <= 1 && (narrow.pageOverflow ?? 99) <= 1,
+    JSON.stringify(narrow))
+  await host.setViewportSize({ width: 1440, height: 1000 })
 
   // ── F. 刷新重放：历史路径也必须只剩一问一答，且付款码卡片照样在 ──────────────
   // 为什么单列一段：流式出口与 /history 是两条独立代码路径（后者还要按 turn 归并、
@@ -211,7 +281,8 @@ if (!reachable) {
     const codes = [...document.querySelectorAll('.bubble pre > code')].map(c => (c.textContent || '').trim())
     return {
       cards: cards.length,
-      svg: cards[0] ? (cards[0].querySelector('svg')?.outerHTML ?? '') : '',
+      svg: cards[0] ? (cards[0].querySelector('.paycode-bars svg')?.outerHTML ?? '') : '',
+      qr: cards[0] ? (cards[0].querySelector('.paycode-qr svg')?.outerHTML ?? '') : '',
       shownCode: cards[0] ? (cards[0].previousElementSibling?.textContent ?? '').trim() : '',
       paycodeBlocks: codes.filter(c => /^[0-9]{20,40}$/.test(c)).length,
       assistantTexts: bubbles.map(b => (b.textContent || '').trim()).filter(t => t !== ''),
@@ -228,6 +299,8 @@ if (!reachable) {
       `解出 "${redecoded.text}"`)
     ok('F. 刷新后条码内容 == 页面显示的数字', redecoded.text === after.shownCode,
       `条码 "${redecoded.text}" vs 页面 "${after.shownCode}"`)
+    const qrAgain = decodeQrSvg(after.qr)
+    ok('F. 刷新后二维码仍在且解码正确', qrAgain.text === SAMPLE, `解出 "${qrAgain.text}"`)
   }
 }
 await browser.close()

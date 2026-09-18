@@ -433,16 +433,21 @@
   .viewer-stage.broken img { display: none; }
   .viewer-stage.broken::before { content: attr(data-fallback); display: block; line-height: var(--lead-body); }
 
-  /* ── 付款码卡片：条码走纸面（扫描必须黑条白底，深色主题下也不例外）────── */
+  /* ── 付款码卡片：码图走纸面（扫描必须黑码白底，深色主题下也不例外）────── */
   .bubble .paycode {
     display: flex; flex-direction: column; align-items: center; gap: var(--s3);
     margin: var(--s3) 0 var(--s4); padding: var(--s4);
     background: var(--paper); border: 1px solid var(--paper-hair);
     border-radius: var(--r-sm);
   }
-  .bubble .paycode-bars { max-width: 100%; overflow-x: auto; }
-  /* 条码图别被压扁：SVG 有固定宽高，这里只允许等比缩小 */
-  .bubble .paycode-bars svg { display: block; height: auto; max-width: 100%; }
+  .bubble .paycode-qr, .bubble .paycode-bars { max-width: 100%; overflow-x: auto; }
+  /* 码图别被压扁：两个 SVG 都有固定宽高，这里只允许等比缩小 */
+  .bubble .paycode-qr svg, .bubble .paycode-bars svg { display: block; height: auto; max-width: 100%; }
+  .bubble .paycode-qr:empty { display: none; }
+  .bubble .paycode-caption {
+    font-size: var(--t-meta); letter-spacing: var(--track-label); text-transform: uppercase;
+    color: var(--paper-ink); opacity: .62;
+  }
   .bubble .paycode-copy {
     font-family: inherit; font-size: var(--t-sm); letter-spacing: var(--track-ui);
     padding: 6px var(--s4); border-radius: var(--r-pill); cursor: pointer;
@@ -688,6 +693,8 @@
       themeToggleTitle: '切换深浅色',
       copyCode: '复制付款码',
       copied: '已复制',
+      payQrLabel: '扫码缴费',
+      payBarLabel: '条码（店员扫）',
       newChatConfirm: '确定开始新对话吗？当前对话记录将从界面清空。',
       contextLong: '当前对话较长，继续提问可能变慢。建议点右上角「新对话」重新开始。',
       suggestions: ['客服热线是多少？', '如何缴交电费？', '遇到停电怎么办？', '电动车如何充电？'],
@@ -727,6 +734,8 @@
       themeToggleTitle: '切換深淺色',
       copyCode: '複製付款碼',
       copied: '已複製',
+      payQrLabel: '掃碼繳費',
+      payBarLabel: '條碼（店員掃）',
       newChatConfirm: '確定開始新對話嗎？目前對話記錄將從介面清空。',
       contextLong: '目前對話較長，繼續提問可能變慢。建議點右上角「新對話」重新開始。',
       suggestions: ['客服熱線是多少？', '如何繳交電費？', '遇到停電怎麼辦？', '電動車如何充電？'],
@@ -764,6 +773,8 @@
       themeToggleTitle: 'Switch light/dark theme',
       copyCode: 'Copy payment code',
       copied: 'Copied',
+      payQrLabel: 'Scan to pay',
+      payBarLabel: 'Barcode (for staff)',
       newChatConfirm: 'Start a new conversation? The current messages will be cleared from this screen.',
       contextLong: 'This conversation is getting long, so replies may slow down. Consider starting a new chat from the top-right button.',
       suggestions: ['What is the customer service hotline?', 'How can I pay my electricity bill?', 'What should I do during a power outage?', 'How do I charge my electric vehicle?'],
@@ -801,6 +812,8 @@
       themeToggleTitle: 'Alternar tema claro/escuro',
       copyCode: 'Copiar código de pagamento',
       copied: 'Copiado',
+      payQrLabel: 'Digitalizar para pagar',
+      payBarLabel: 'Código de barras (balcão)',
       newChatConfirm: 'Iniciar uma nova conversa? As mensagens atuais serão removidas do ecrã.',
       contextLong: 'Esta conversa está longa e as respostas podem ficar mais lentas. Considere iniciar uma nova conversa no botão superior direito.',
       suggestions: ['Qual é a linha de apoio ao cliente?', 'Como posso pagar a conta de eletricidade?', 'O que fazer durante uma falha de energia?', 'Como carrego o meu veículo elétrico?'],
@@ -1496,30 +1509,83 @@
   }
 
   /**
-   * 把助手回答里的「付款码」升级成可扫可复制的小卡片。
-   * 判据只看**数据形态**（纯数字、20–40 位），不依赖模型是否记得写特定围栏语言——
-   * 模型少写一个 ```barcode 不该让功能失效。已处理过的节点打 data-paycode 防重复。
+   * 找出气泡里的付款码候选（原文 + 码图该插在哪）。
+   *
+   * 三种真实形态都要接住，否则访客只看到一串数字、没有码图：
+   *   ① ` ```barcode ` 围栏（提示词要求的形态）→ 卡片插在代码块之后；
+   *   ② 行内代码 `` `720…` `` → 插在该 `code` 之后；
+   *   ③ 直接写在句子里 → 在数字之后插入（拆文本节点）。
+   * 有围栏时以围栏为准，不再扫正文——避免同一串数字出现两张卡片。
    * @param root - 气泡容器
+   * @returns `[{ text, anchor, splitAt? }]`
    */
-  function decoratePayCodes(root) {
-    if (!root) return
+  function payCodeCandidates(root) {
+    const fenced = []
     for (const code of root.querySelectorAll('pre > code')) {
       const pre = code.parentElement
       if (!pre || pre.dataset.paycode === '1') continue
       const text = (code.textContent || '').trim()
       const flagged = pre.dataset.lang === 'barcode'
+      if (text === '') continue
       // 判据：显式 ```barcode 围栏（模型按提示词走这条），或纯数字兜底
       // （模型偶尔不用围栏也不该让功能失效）。
       if (!flagged && !/^[0-9]{20,40}$/.test(text)) continue
-      if (flagged && text === '') continue
-      const svg = barcodeSvg(text)
+      fenced.push({ text, anchor: pre })
+    }
+    if (fenced.length > 0) return fenced
+    const inlineCode = []
+    for (const code of root.querySelectorAll('code')) {
+      if (code.closest('pre') || code.closest('.paycode')) continue
+      const text = (code.textContent || '').trim()
+      if (/^[0-9]{20,40}$/.test(text)) inlineCode.push({ text, anchor: code })
+    }
+    if (inlineCode.length > 0) return inlineCode
+    // 第 ③ 种：数字直接落在正文文字里。只扫不在 pre/code/a 里的文本节点。
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+    const found = []
+    const nodes = []
+    while (walker.nextNode()) nodes.push(walker.currentNode)
+    for (const node of nodes) {
+      const parent = node.parentElement
+      if (!parent || parent.closest('pre, code, a, .paycode')) continue
+      const m = /(?:^|\D)([0-9]{20,40})(?!\d)/.exec(node.nodeValue || '')
+      if (m === null) continue
+      found.push({ text: m[1], anchor: node, splitAt: m.index + m[0].length - m[1].length })
+    }
+    return found
+  }
+
+  /**
+   * 把助手回答里的「付款码」升级成可扫可复制的小卡片：二维码 + 一维条码 + 一键复制。
+   *
+   * 两个码图内容同源（同一串付款码数字），因为「缴费入口认哪种码」不是我们说了算：
+   * 账单接口的字段名是 `barcode`（一维条码），而微信/支付宝一类的扫码入口通常按
+   * 二维码识别，所以两个都给，访客截哪个能被认就用哪个；旁边还有可复制的数字。
+   * 二维码要等库加载，先出条码与数字，库到了再补上二维码——任一环节失败都不影响
+   * 访客拿到付款码。
+   * @param root - 气泡容器
+   */
+  function decoratePayCodes(root) {
+    if (!root) return
+    for (const candidate of payCodeCandidates(root)) {
+      const svg = barcodeSvg(candidate.text)
       if (svg === '') continue
-      pre.dataset.paycode = '1'
       const card = document.createElement('div')
       card.className = 'paycode'
-      const barcode = document.createElement('div')
-      barcode.className = 'paycode-bars'
-      barcode.innerHTML = svg
+      card.dataset.code = candidate.text
+      const qr = document.createElement('div')
+      qr.className = 'paycode-qr'
+      // 两个码图各配一行小标签，避免访客不知道哪个码给谁用（文案走 i18n）
+      qr.title = t('payQrLabel')
+      const qrCaption = document.createElement('div')
+      qrCaption.className = 'paycode-caption'
+      qrCaption.textContent = t('payQrLabel')
+      const bars = document.createElement('div')
+      bars.className = 'paycode-bars'
+      bars.innerHTML = svg
+      const barCaption = document.createElement('div')
+      barCaption.className = 'paycode-caption'
+      barCaption.textContent = t('payBarLabel')
       const copy = document.createElement('button')
       copy.type = 'button'
       copy.className = 'paycode-copy'
@@ -1531,10 +1597,10 @@
           setTimeout(() => { copy.textContent = t('copyCode') }, 1600)
         }
         if (navigator.clipboard && window.isSecureContext) {
-          navigator.clipboard.writeText(text).then(done, done)
+          navigator.clipboard.writeText(candidate.text).then(done, done)
         } else {
           const box = document.createElement('textarea')
-          box.value = text
+          box.value = candidate.text
           box.setAttribute('readonly', '')
           box.style.cssText = 'position:fixed;left:-9999px'
           document.body.appendChild(box)
@@ -1544,10 +1610,99 @@
           done()
         }
       })
-      card.appendChild(barcode)
+      card.appendChild(qr)
+      card.appendChild(qrCaption)
+      card.appendChild(bars)
+      card.appendChild(barCaption)
       card.appendChild(copy)
-      pre.insertAdjacentElement('afterend', card)
+      if (candidate.splitAt !== undefined) {
+        // 形态③：拆开文本节点，把卡片插在数字之后（数字本身留在正文里）
+        const node = candidate.anchor
+        const after = node.splitText(candidate.splitAt)
+        after.parentNode.insertBefore(card, after)
+      } else {
+        candidate.anchor.insertAdjacentElement('afterend', card)
+        if (candidate.anchor.dataset) candidate.anchor.dataset.paycode = '1'
+      }
+      // 二维码库到位后补图；失败就把这个槽位留空（CSS 里 :empty 不占位）
+      loadQrLib()
+        .then(() => { qr.innerHTML = qrSvg(candidate.text) })
+        .catch(() => { /* 库不可用：条码 + 数字照常可用 */ })
     }
+  }
+
+  /**
+   * 懒加载二维码库（同源相对路径）。失败返回 null，**条码路径不受影响**：
+   * 付款码的两个码图互相独立，任一库不可用都还有另一个 + 可复制的数字。
+   */
+  function loadQrLib() {
+    if (typeof window.qrcode === 'function') return Promise.resolve(window.qrcode)
+    if (qrLibFailed) return Promise.reject(new Error('qrcode lib unavailable'))
+    if (qrLibPromise) return qrLibPromise
+    qrLibPromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script')
+      script.src = QRCODE_ASSET
+      script.onload = () => {
+        if (typeof window.qrcode !== 'function') {
+          qrLibFailed = true
+          qrLibPromise = null
+          reject(new Error('qrcode lib not exposed'))
+          return
+        }
+        resolve(window.qrcode)
+      }
+      script.onerror = () => {
+        qrLibFailed = true
+        qrLibPromise = null
+        if (script.parentNode) script.parentNode.removeChild(script)
+        reject(new Error('qrcode lib load failed'))
+      }
+      document.head.appendChild(script)
+    })
+    return qrLibPromise
+  }
+
+  /**
+   * 生成付款码二维码 SVG。
+   *
+   * 为什么要二维码：缴费入口（微信/支付宝一类的扫码）普遍按二维码识别，一维码
+   * 支持有限，所以两个码图都给，访客截哪个能被认就用哪个。内容与一维码**完全同源**
+   * （同一串付款码数字），不存在「两种码指向不同东西」的可能。
+   * 纠错级别 M（脏屏/压缩截图仍可解），版本 0 = 按内容自动选最小版本。
+   * @param text - 付款码原文
+   * @returns SVG 字符串；库不可用或编码失败时返回空串
+   */
+  function qrSvg(text) {
+    if (typeof window.qrcode !== 'function') return ''
+    let model
+    try {
+      model = window.qrcode(0, 'M')
+      // 显式给编码模式：库的默认是 Byte，纯数字走 Byte 会比 Numeric 多一个版本
+      // （实测同一个 30 位付款码：Byte 29×29、Numeric 21×21）。模块越少、单模块
+      // 越大，截图后越好扫，所以按内容选最省的模式。
+      model.addData(text, /^[0-9]+$/.test(text) ? 'Numeric' : 'Byte')
+      model.make()
+    } catch {
+      return ''   // 内容超出二维码容量等：不给图，正文里仍有数字可复制
+    }
+    const count = model.getModuleCount()
+    const module = count <= 33 ? 6 : 4   // 模块像素：小版本给大模块，截图后仍能扫
+    const quiet = 4                       // 静区 ≥4 模块（二维码规范要求）
+    const size = (count + quiet * 2) * module
+    // 用一条 path 画所有深色模块（比 count² 个 rect 省节点，序列化也小得多）
+    let path = ''
+    for (let r = 0; r < count; r++) {
+      for (let c = 0; c < count; c++) {
+        if (!model.isDark(r, c)) continue
+        const x = (c + quiet) * module
+        const y = (r + quiet) * module
+        path += `M${x} ${y}h${module}v${module}h-${module}z`
+      }
+    }
+    return '<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-label="付款碼二維碼"'
+      + ` width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">`
+      + `<rect width="${size}" height="${size}" fill="#ffffff"/>`
+      + `<path d="${path}" fill="#000000"/></svg>`
   }
 
   const HTML_PREVIEW_CSS = `
@@ -2237,6 +2392,13 @@
   // 库文件随页面一起部署（/assets/mermaid-11.16.0.min.js，取本仓库已锁定的
   // mermaid 11.16.0），渲染全在访客浏览器里完成，不需要任何在线渲染服务。
   const MERMAID_ASSET = 'assets/mermaid-11.16.0.min.js'
+
+  // ── 二维码本地渲染（离线，缴费入口按二维码识别）─────────────────────────
+  // 同样是随页面部署的本地第三方资产（qrcode-generator 2.0.4，MIT），与 mermaid
+  // 同一套懒加载形态：库不可用时仅少一个码图，条码与可复制的数字照常工作。
+  const QRCODE_ASSET = 'assets/qrcode-2.0.4.js'
+  let qrLibPromise = null
+  let qrLibFailed = false
 
   // 品牌主题：mermaid 自带 base 主题 + themeVariables/themeCSS 就是官方的样式包
   // 机制（离线、随库版本匹配）。配色与页面一致（--brand #2563eb / 浅底深字），

@@ -23,6 +23,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { JSDOM, VirtualConsole } from 'jsdom'
+import { decodeQrSvg } from './qr-decode.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
@@ -31,6 +32,9 @@ const gateModule = await import(join(HERE, '..', 'assets', 'output-gate.js'))
 const GUEST = join(HERE, '..')
 const pageHtml = readFileSync(join(GUEST, 'index.html'), 'utf8')
 const gateSource = readFileSync(join(GUEST, 'assets', 'output-gate.js'), 'utf8')
+// 二维码库同样是随页面部署的本地资产，jsdom 的加载器必须真的提供它——否则
+// 「二维码没出来」是夹具的错，会被误读成实现的错。
+const qrLibSource = readFileSync(join(GUEST, 'assets', 'qrcode-2.0.4.js'), 'utf8')
 
 let passed = 0
 let failed = 0
@@ -124,6 +128,13 @@ function boot(options = {}) {
       if (options.sessionId) {
         try { window.localStorage.setItem('dshagent_session', options.sessionId) } catch { /* jsdom 无 storage 时忽略 */ }
       }
+      // 二维码库按**内联脚本**提供：本套夹具的 resources.fetch 其实不会被 jsdom 调用
+      // （门禁资产也是因此在 inlineGateScript 里内联的），所以动态 <script src> 拿不到
+      // 文件。这里提前把库注入全局，loadQrLib() 便直接命中已加载分支——走的仍是产品
+      // 真实代码路径（库在 → 画二维码），只是加载方式换成夹具可控的那种。
+      // `options.qrMissing`：模拟库缺失，验证「二维码没了，条码与数字照常可用」。
+      if (!options.qrMissing) window.eval(qrLibSource)
+
       // 页面按 navigator.languages 选字典（正确行为）。夹具固定为 zh，让断言针对
       // 同一套文案；四语言齐备性由 output-gate-check.mjs 断言。
       Object.defineProperty(window.navigator, 'languages', { value: ['zh-CN', 'zh'], configurable: true })
@@ -1559,13 +1570,25 @@ async function main() {
       const bubble = lastBubble(booted.doc)
       const doc = booted.doc
       const card = bubble ? bubble.querySelector('.paycode') : null
-      const svg = card ? card.querySelector('svg') : null
+      // 卡片里有两个码图：二维码在前、一维条码在后，所以必须按各自的容器取，
+      // `card.querySelector('svg')` 会拿到二维码（旧断言正是这么挂的）。
+      const svg = card ? card.querySelector('.paycode-bars svg') : null
+      const qrSvg = card ? card.querySelector('.paycode-qr svg') : null
       const pre = card ? card.previousElementSibling : null
+      const qr = qrSvg ? decodeQrSvg(qrSvg.outerHTML) : { error: '没有二维码' }
       const result = {
         card: card !== null,
         svg: svg !== null,
         svgWidth: svg ? Number(svg.getAttribute('width')) : 0,
         firstBarX: svg ? Number((svg.querySelector('rect[x]') || {}).getAttribute?.('x') ?? 0) : 0,
+        qr: qrSvg !== null,
+        qrText: qr.text ?? '',
+        qrError: qr.error ?? '',
+        qrCount: qr.count ?? 0,
+        qrModule: qr.module ?? 0,
+        qrQuiet: qr.quiet ?? 0,
+        qrCaption: card && card.querySelector('.paycode-qr + .paycode-caption')
+          ? card.querySelector('.paycode-qr + .paycode-caption').textContent : '',
         preLang: pre ? pre.getAttribute('data-lang') : null,
         digitsVisible: bubble ? (bubble.textContent || '').includes(PAY) : false,
         copyLabel: card && card.querySelector('.paycode-copy') ? card.querySelector('.paycode-copy').textContent : '',
@@ -1581,11 +1604,26 @@ async function main() {
       card: flagged.card, svg: flagged.svg, svgWidth: flagged.svgWidth,
       firstBarX: flagged.firstBarX, preLang: flagged.preLang,
       digitsVisible: flagged.digitsVisible, copyLabel: flagged.copyLabel,
+      qr: flagged.qr, qrText: flagged.qrText, qrCount: flagged.qrCount,
+      qrModule: flagged.qrModule, qrQuiet: flagged.qrQuiet, qrCaption: flagged.qrCaption,
     }
 
-    check('③.15 显式 ```barcode 围栏 → 生成 .paycode 卡片 + SVG', () => {
+    check('③.15 显式 ```barcode 围栏 → 生成 .paycode 卡片 + 一维条码 + 二维码', () => {
       assert.equal(flagged.card, true, '付款码必须渲染成卡片')
-      assert.equal(flagged.svg, true, '卡片里必须有条码 SVG')
+      assert.equal(flagged.svg, true, '卡片里必须有一维条码 SVG')
+      assert.equal(flagged.qr, true, `卡片里必须有二维码 SVG（否则缴费入口扫不了）：${flagged.qrError}`)
+    })
+    check('③.15 二维码解码回原始付款码（真解一次，不比矩阵）', () => {
+      assert.equal(flagged.qrText, PAY, `解码结果 "${flagged.qrText}"，错误：${flagged.qrError}`)
+    })
+    check('③.15 二维码静区 ≥4 模块、模块 ≥4px（扫得到的硬要求）', () => {
+      assert.ok(flagged.qrQuiet >= 4, `静区 ${flagged.qrQuiet} 模块`)
+      assert.ok(flagged.qrModule >= 4, `模块 ${flagged.qrModule}px`)
+      assert.ok(flagged.qrCount >= 21 && (flagged.qrCount - 21) % 4 === 0,
+        `模块数 ${flagged.qrCount} 不是合法二维码版本（21+4k）`)
+    })
+    check('③.15 两个码图都有用途标签（访客知道哪个给谁用）', () => {
+      assert.ok(flagged.qrCaption.length > 0, '二维码缺少标签')
     })
     check('③.15 pre 带 data-lang="barcode"（识别不靠猜数字形态）', () => {
       assert.equal(flagged.preLang, 'barcode', `实际 data-lang=${String(flagged.preLang)}`)
@@ -1613,6 +1651,73 @@ async function main() {
     check('③.15 模型漏写围栏语言：纯数字块仍升级为卡片（兜底）', () => {
       assert.equal(plain.card, true, '无语言词的纯数字块也应出卡片')
       assert.equal(plain.svgWidth, expectedModules * 2, '兜底路径的条码宽度必须同样正确')
+      assert.equal(plain.qrText, PAY, `兜底路径的二维码也必须解得出：${plain.qrError}`)
+    })
+
+    // 第 ③ 种形态：数字直接写在句子/行内代码里（模型没进围栏）也必须出码图。
+    const inline = await (async () => {
+      const booted = boot({
+        stream: () => sseResponse([
+          delta(`本期應繳 MOP 30.00，付款碼 ${PAY}，請截圖後繳費。\n`),
+          `event: done\ndata: ${JSON.stringify({ reply: `本期應繳 MOP 30.00，付款碼 ${PAY}，請截圖後繳費。\n`, sources: [] })}\n\n`,
+        ], { delayMs: 5 }),
+      })
+      await sleep(80)
+      booted.doc.getElementById('input').value = '付款碼'
+      booted.doc.getElementById('send').click()
+      await sleep(900)
+      const bubble = lastBubble(booted.doc)
+      const card = bubble ? bubble.querySelector('.paycode') : null
+      const qrSvg = card ? card.querySelector('.paycode-qr svg') : null
+      const qr = qrSvg ? decodeQrSvg(qrSvg.outerHTML) : { error: '没有二维码' }
+      const out = {
+        card: card !== null,
+        qrText: qr.text ?? '',
+        qrError: qr.error ?? '',
+        digitsStillVisible: bubble ? (bubble.textContent || '').includes(PAY) : false,
+      }
+      booted.window.close()
+      return out
+    })()
+    check('③.15 数字直接写在句子里（无围栏）也出码图', () => {
+      assert.equal(inline.card, true, `正文里的付款码也必须出卡片：${inline.qrError}`)
+      assert.equal(inline.qrText, PAY, `解码结果 "${inline.qrText}"`)
+      assert.equal(inline.digitsStillVisible, true, '数字本身必须仍留在正文里（可复制/可核对）')
+    })
+
+    // 二维码库不可用时的降级：一维条码 + 可复制的数字必须照常工作。
+    // 判据是「少一个码图」而不是「整张卡片消失」——访客拿不到付款码才是事故。
+    const noLib = await (async () => {
+      const booted = boot({
+        qrMissing: true,
+        stream: () => sseResponse([
+          delta(`付款碼：\n\n\`\`\`barcode\n${PAY}\n\`\`\`\n`),
+          `event: done\ndata: ${JSON.stringify({ reply: `付款碼：\n\n\`\`\`barcode\n${PAY}\n\`\`\`\n`, sources: [] })}\n\n`,
+        ], { delayMs: 5 }),
+      })
+      await sleep(80)
+      booted.doc.getElementById('input').value = '付款碼'
+      booted.doc.getElementById('send').click()
+      await sleep(900)
+      const bubble = lastBubble(booted.doc)
+      const card = bubble ? bubble.querySelector('.paycode') : null
+      const barsSvg = card ? card.querySelector('.paycode-bars svg') : null
+      const out = {
+        card: card !== null,
+        bars: barsSvg !== null,
+        qr: card ? card.querySelector('.paycode-qr svg') !== null : true,
+        digitsVisible: bubble ? (bubble.textContent || '').includes(PAY) : false,
+        copyLabel: card && card.querySelector('.paycode-copy') ? card.querySelector('.paycode-copy').textContent : '',
+      }
+      booted.window.close()
+      return out
+    })()
+    check('③.15 二维码库缺失时降级：条码与数字照常，不整卡消失', () => {
+      assert.equal(noLib.card, true, '库缺失也必须出卡片')
+      assert.equal(noLib.bars, true, '一维条码不依赖二维码库')
+      assert.equal(noLib.digitsVisible, true, '数字必须可见')
+      assert.ok(noLib.copyLabel.length > 0, '复制按钮必须在')
+      assert.equal(noLib.qr, false, '库缺失时不应凭空出现二维码')
     })
 
     // 反向判据：普通代码块不得被误装饰成付款码。

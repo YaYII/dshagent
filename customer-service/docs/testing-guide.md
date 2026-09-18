@@ -158,7 +158,7 @@ docker exec dshagent-app sh -c 'cd /app &&
   node --import tsx/esm customer-service/plugins/output-gate/tests/http-exits-check.mjs &&  # 28
   node --import tsx/esm customer-service/plugins/api-client/tests/lookup-check.mjs &&       # 34
   node customer-service/web/guest/tests/output-gate-check.mjs &&                            # 65（assets 是 CJS，别加 tsx）
-  node customer-service/web/guest/tests/gate-dom-check.mjs'                                 # 104（jsdom 真页面）
+  node customer-service/web/guest/tests/gate-dom-check.mjs'                                 # 109（jsdom 真页面）
 ```
 
 改了测试文件但不想整组重建镜像时，直接拷进去（秒级）：
@@ -177,19 +177,22 @@ cd /home/as-workstation01/Documents/project/Chrome
 D=/home/as-workstation01/Documents/project/dshagent
 
 node $D/customer-service/plugins/guest-server/tests/duplicate-turn-check.mjs  # 16 一问一答 + 多步轮历史归并
-node $D/customer-service/web/guest/tests/paycode-check.mjs                    # 22 付款码：解码还原 + 静区/模块 + 刷新重放
+node $D/customer-service/web/guest/tests/paycode-check.mjs                    # 32 付款码：二维码/条码都解码 + 静区/模块 + 刷新重放
 node $D/customer-service/web/guest/tests/html-frame-check.mjs                 # 10 HTML 预览按内容自适应
 node $D/customer-service/web/guest/tests/ui-audit.mjs                         # 对比度/溢出/中文行宽 + 截图
 ```
 
-八套件合计 **355** 项断言，全过才算改动可信。
+八套件合计 **370** 项断言，全过才算改动可信。
 
 ### 4.3 判据怎么选的（两条硬规矩）
 
-1. **能独立复算的，绝不调用被测代码复算自己。** 付款码条码不能只断言「图出来了」——
+1. **能独立复算的，绝不调用被测代码复算自己。** 付款码码图不能只断言「图出来了」——
    编码错了不会报错，只会让访客扫出**错误的数字**，比不显示更糟。因此
-   `paycode-check.mjs` 从渲染出的 SVG 里把条空读回来、按 Code128 规范解码，再与
+   `paycode-check.mjs` 从渲染出的 SVG 里把条空读回来、按 Code128 规范解码；二维码交给
+   `tests/jsqr-1.4.0.js`（jsQR 原样副本，**只测试用**，页面不加载）真解一次，再与
    **业务系统接口**当前返回的付款码逐字比对（期望值也是现取的，不是写死的）。
+   注意二维码**不能**用「与另一个实现的矩阵逐格比对」当判据：掩码由编码器自行择优，
+   实测 qrcode-generator 与 Python `qrcode` 在同串同纠错级下掩码不同（差 116 格）却都能扫。
 2. **一条渲染异常不得吃掉访客的答案。** 正文渲染串在整轮的 try 里，任何渲染异常
    都会被当成「断流」；恢复路径再抛一次就没人接了，气泡永远停在「正在恢复」。
    所以逐帧入口包了 `safeRenderStream`（抛错退化为纯文本），判据按行宽/块数断言，
