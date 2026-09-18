@@ -180,7 +180,12 @@ ok('bill 不固定 level=1（已按要求改用 5）', !/level:\s*'1'/.test(bill
 const billFields = (yml.split('bill:')[1] ?? '').split('apiLookup:')[0]
 ok('付款码 barcode 在字段白名单里（否则开了 level=5 也被裁掉）', /^\s+-\s+barcode\s*$/m.test(billFields))
 ok('提示词说明 level 只用 1 与 5', yml.includes('2／3／4 不要用'))
-ok('提示词要求主动教访客用付款码缴费', yml.includes('截圖／保存這個付款碼') && yml.includes('微信或支付寶'))
+// 缴费口径按业务方要求锁定为**澳电自家 App**：提示词必须点名 CEM，且不得再指向
+// 微信／支付宝（上一版正文里写的正是这两个，属于实现者的臆测，已纠正）。
+ok('提示词要求把付款码放进围栏（前端靠它出二维码）', yml.includes('```barcode 圍欄'))
+ok('提示词要求教访客用「澳電 CEM」App 扫码缴费', yml.includes('澳電 CEM') && yml.includes('掃描這個二維碼繳費'))
+ok('提示词明确不得指向微信／支付宝', /不要叫訪客用微信／支付寶/.test(yml))
+ok('提示词说明界面上只出现二维码、数字不重复显示', yml.includes('數字不會重複顯示在正文裡'))
 ok('提示词禁止报出总数', yml.includes('您名下共有 N 張合約'))
 
 globalThis.fetch = originalFetch

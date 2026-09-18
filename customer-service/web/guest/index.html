@@ -440,10 +440,21 @@
     background: var(--paper); border: 1px solid var(--paper-hair);
     border-radius: var(--r-sm);
   }
-  .bubble .paycode-qr, .bubble .paycode-bars { max-width: 100%; overflow-x: auto; }
-  /* 码图别被压扁：两个 SVG 都有固定宽高，这里只允许等比缩小 */
-  .bubble .paycode-qr svg, .bubble .paycode-bars svg { display: block; height: auto; max-width: 100%; }
+  .bubble .paycode-qr { max-width: 100%; overflow-x: auto; }
+  /* 码图别被压扁：SVG 有固定宽高，这里只允许等比缩小 */
+  .bubble .paycode-qr svg { display: block; height: auto; max-width: 100%; }
   .bubble .paycode-qr:empty { display: none; }
+  /* 承载付款码数字的那段正文隐去：二维码已含同一串数字，正文再摆一遍会让访客以为
+     要手动输。用「视觉隐藏但留在可访问树」的标准写法（1px + clip + opacity:0），
+     而不是 display:none——屏幕阅读器仍能读到这串数字。
+     必须带 `.bubble` 前缀：`.bubble pre`（0,1,1）比裸 `.paycode-src`（0,1,0）更具体，
+     裸类名会被它盖掉，于是「隐藏」在真实浏览器里完全失效（jsdom 按类名判据时看不出来，
+     实测踩过——所以那条判据现在量的是渲染盒）。 */
+  .bubble .paycode-src {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+    overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+    opacity: 0; pointer-events: none;
+  }
   .bubble .paycode-caption {
     font-size: var(--t-meta); letter-spacing: var(--track-label); text-transform: uppercase;
     color: var(--paper-ink); opacity: .62;
@@ -693,8 +704,7 @@
       themeToggleTitle: '切换深浅色',
       copyCode: '复制付款码',
       copied: '已复制',
-      payQrLabel: '扫码缴费',
-      payBarLabel: '条码（店员扫）',
+      payQrLabel: '用「澳电 CEM」App 扫码缴费',
       newChatConfirm: '确定开始新对话吗？当前对话记录将从界面清空。',
       contextLong: '当前对话较长，继续提问可能变慢。建议点右上角「新对话」重新开始。',
       suggestions: ['客服热线是多少？', '如何缴交电费？', '遇到停电怎么办？', '电动车如何充电？'],
@@ -734,8 +744,7 @@
       themeToggleTitle: '切換深淺色',
       copyCode: '複製付款碼',
       copied: '已複製',
-      payQrLabel: '掃碼繳費',
-      payBarLabel: '條碼（店員掃）',
+      payQrLabel: '用「澳電 CEM」App 掃碼繳費',
       newChatConfirm: '確定開始新對話嗎？目前對話記錄將從介面清空。',
       contextLong: '目前對話較長，繼續提問可能變慢。建議點右上角「新對話」重新開始。',
       suggestions: ['客服熱線是多少？', '如何繳交電費？', '遇到停電怎麼辦？', '電動車如何充電？'],
@@ -773,8 +782,7 @@
       themeToggleTitle: 'Switch light/dark theme',
       copyCode: 'Copy payment code',
       copied: 'Copied',
-      payQrLabel: 'Scan to pay',
-      payBarLabel: 'Barcode (for staff)',
+      payQrLabel: 'Scan with the CEM App to pay',
       newChatConfirm: 'Start a new conversation? The current messages will be cleared from this screen.',
       contextLong: 'This conversation is getting long, so replies may slow down. Consider starting a new chat from the top-right button.',
       suggestions: ['What is the customer service hotline?', 'How can I pay my electricity bill?', 'What should I do during a power outage?', 'How do I charge my electric vehicle?'],
@@ -812,8 +820,7 @@
       themeToggleTitle: 'Alternar tema claro/escuro',
       copyCode: 'Copiar código de pagamento',
       copied: 'Copiado',
-      payQrLabel: 'Digitalizar para pagar',
-      payBarLabel: 'Código de barras (balcão)',
+      payQrLabel: 'Digitalize com a App da CEM para pagar',
       newChatConfirm: 'Iniciar uma nova conversa? As mensagens atuais serão removidas do ecrã.',
       contextLong: 'Esta conversa está longa e as respostas podem ficar mais lentas. Considere iniciar uma nova conversa no botão superior direito.',
       suggestions: ['Qual é a linha de apoio ao cliente?', 'Como posso pagar a conta de eletricidade?', 'O que fazer durante uma falha de energia?', 'Como carrego o meu veículo elétrico?'],
@@ -1405,109 +1412,6 @@
 
   /** 沙箱预览里的基础排版：模型 HTML 没带样式时也不至于是一坨裸标签，并且
    * 在窄屏（手机）上不撑破容器——宽内容改为内部滚动而非溢出。 */
-  /* ══════════════════════════════════════════════════════════════════════════
-     付款码条码渲染（Code128）
-     账单接口在 level=5 时多回 `barcode`（30 位数字，结构 = 前缀+合約號+到期日+金额段）。
-     它同时以纯文本块出现，这里额外渲染成**真条码**，让访客截图后可直接被缴费 App 扫。
-     为什么是一维条码而不是二维码：账单上的繳費條碼就是一维码，缴费 App 的「掃碼繳費」
-     认这个形态；二维码承载同样的数据，但通用扫码器多半当纯文本/链接处理，不一定进
-     繳費流程。另配一键复制——多数繳費小程序其实要的是把这串数字粘进去。
-     码表取自权威实现（jsbarcode 的 Code128 常量表），非手抄。
-     ══════════════════════════════════════════════════════════════════════════ */
-  /** Code128 各符号的条空位串（下标即符号值，0..105 数据符号，106 = STOP）。 */
-  const CODE128_BARS = [
-    11011001100, 11001101100, 11001100110, 10010011000, 10010001100, 10001001100, 10011001000, 10011000100,
-    10001100100, 11001001000, 11001000100, 11000100100, 10110011100, 10011011100, 10011001110, 10111001100,
-    10011101100, 10011100110, 11001110010, 11001011100, 11001001110, 11011100100, 11001110100, 11101101110,
-    11101001100, 11100101100, 11100100110, 11101100100, 11100110100, 11100110010, 11011011000, 11011000110,
-    11000110110, 10100011000, 10001011000, 10001000110, 10110001000, 10001101000, 10001100010, 11010001000,
-    11000101000, 11000100010, 10110111000, 10110001110, 10001101110, 10111011000, 10111000110, 10001110110,
-    11101110110, 11010001110, 11000101110, 11011101000, 11011100010, 11011101110, 11101011000, 11101000110,
-    11100010110, 11101101000, 11101100010, 11100011010, 11101111010, 11001000010, 11110001010, 10100110000,
-    10100001100, 10010110000, 10010000110, 10000101100, 10000100110, 10110010000, 10110000100, 10011010000,
-    10011000010, 10000110100, 10000110010, 11000010010, 11001010000, 11110111010, 11000010100, 10001111010,
-    10100111100, 10010111100, 10010011110, 10111100100, 10011110100, 10011110010, 11110100100, 11110010100,
-    11110010010, 11011011110, 11011110110, 11110110110, 10101111000, 10100011110, 10001011110, 10111101000,
-    10111100010, 11110101000, 11110100010, 10111011110, 10111101110, 11101011110, 11110101110, 11010000100,
-    11010010000, 11010011100, 1100011101011,
-  ]
-  /** Code128 校验和与起始符常量。 */
-  const CODE128_MODULO = 103
-  const CODE128_START_C = 105
-  const CODE128_START_B = 104
-  const CODE128_STOP = 106
-
-  /**
-   * 把一串数字编成 Code128 位串（优先 C 集：两位数字压一个符号，最省宽度）。
-   * 非数字内容退回 B 集逐字符编码，保证任何付款码都能出图而不是留空白。
-   * @param text - 付款码原文
-   * @returns 位串（1 = 条，0 = 空），编码失败返回 null
-   */
-  function code128Bits(text) {
-    const digitsOnly = /^[0-9]+$/.test(text)
-    const codes = []
-    if (digitsOnly && text.length % 2 === 0) {
-      codes.push(CODE128_START_C)
-      for (let i = 0; i < text.length; i += 2) codes.push(Number(text.slice(i, i + 2)))
-    } else if (digitsOnly) {
-      // 奇数位：先 B 集吃掉首位，再切 C 集
-      codes.push(CODE128_START_B, text.charCodeAt(0) - 32)
-      if (text.length > 1) {
-        codes.push(CODE128_START_C)
-        for (let i = 1; i < text.length; i += 2) codes.push(Number(text.slice(i, i + 2)))
-      }
-    } else {
-      codes.push(CODE128_START_B)
-      for (const ch of text) {
-        const v = ch.charCodeAt(0) - 32
-        if (v < 0 || v > 94) return null
-        codes.push(v)
-      }
-    }
-    // 校验和：起始符 + Σ(码值 × 位置)，位置从 1 起算，最后 mod 103
-    let sum = codes[0]
-    for (let i = 1; i < codes.length; i++) sum += codes[i] * i
-    codes.push(sum % CODE128_MODULO, CODE128_STOP)
-    let bits = ''
-    for (const c of codes) {
-      const bar = CODE128_BARS[c]
-      if (bar === undefined) return null
-      bits += String(bar)
-    }
-    return bits
-  }
-
-  /**
-   * 生成付款码条码 SVG（白底黑条 + 左右静区 + 人眼可读数字）。
-   * 静区是扫码硬要求：两侧各留 ≥10 个模块，否则扫描器无法定位起始符。
-   * @param text - 付款码原文
-   * @returns SVG 字符串；无法编码时返回空串
-   */
-  function barcodeSvg(text) {
-    const bits = code128Bits(text)
-    if (bits === null || bits.length === 0) return ''
-    const module = 2            // 每模块像素宽：手机截图上仍可扫
-    const quiet = 10            // 静区模块数（Code128 规范要求 ≥10）
-    const height = 72
-    const width = (bits.length + quiet * 2) * module
-    let rects = ''
-    let x = quiet * module
-    let runStart = 0
-    // 把连续同值位合并成一个矩形，减少 DOM 节点（30 位码约 200 个模块 → 约 60 个矩形）
-    for (let i = 1; i <= bits.length; i++) {
-      if (i === bits.length || bits[i] !== bits[runStart]) {
-        if (bits[runStart] === '1') {
-          rects += `<rect x="${x + runStart * module}" y="0" width="${(i - runStart) * module}" height="${height}"/>`
-        }
-        runStart = i
-      }
-    }
-    return '<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-label="付款碼條碼"'
-      + ` width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`
-      + `<rect width="${width}" height="${height}" fill="#ffffff"/>`
-      + `<g fill="#000000">${rects}</g></svg>`
-  }
-
   /**
    * 找出气泡里的付款码候选（原文 + 码图该插在哪）。
    *
@@ -1516,8 +1420,11 @@
    *   ② 行内代码 `` `720…` `` → 插在该 `code` 之后；
    *   ③ 直接写在句子里 → 在数字之后插入（拆文本节点）。
    * 有围栏时以围栏为准，不再扫正文——避免同一串数字出现两张卡片。
+   * 形态③给的是**下标区间**而不是单个位置：`startAt` 是数字起始、`endAt` 是数字结束，
+   * 调用方据此把这段数字单独切出来隐藏（只给一个下标极易把「起点」当「终点」用，
+   * 实测就因此把 splitText 传成负数、整段装饰静默失败）。
    * @param root - 气泡容器
-   * @returns `[{ text, anchor, splitAt? }]`
+   * @returns `[{ text, anchor, startAt?, endAt? }]`
    */
   function payCodeCandidates(root) {
     const fenced = []
@@ -1550,42 +1457,35 @@
       if (!parent || parent.closest('pre, code, a, .paycode')) continue
       const m = /(?:^|\D)([0-9]{20,40})(?!\d)/.exec(node.nodeValue || '')
       if (m === null) continue
-      found.push({ text: m[1], anchor: node, splitAt: m.index + m[0].length - m[1].length })
+      // 数字前面的那个非数字字符属于 match 但属于正文，所以要减掉它的长度
+      const startAt = m.index + m[0].length - m[1].length
+      found.push({ text: m[1], anchor: node, startAt, endAt: startAt + m[1].length })
     }
     return found
   }
 
   /**
-   * 把助手回答里的「付款码」升级成可扫可复制的小卡片：二维码 + 一维条码 + 一键复制。
+   * 把助手回答里的「付款码」升级成二维码卡片：一张二维码 + 一键复制。
    *
-   * 两个码图内容同源（同一串付款码数字），因为「缴费入口认哪种码」不是我们说了算：
-   * 账单接口的字段名是 `barcode`（一维条码），而微信/支付宝一类的扫码入口通常按
-   * 二维码识别，所以两个都给，访客截哪个能被认就用哪个；旁边还有可复制的数字。
-   * 二维码要等库加载，先出条码与数字，库到了再补上二维码——任一环节失败都不影响
-   * 访客拿到付款码。
+   * 只出二维码、不出条码：本澳缴费入口是**澳电自己的 App**（「澳電 CEM」）扫码缴费，
+   * 它认二维码。原来的答案正文里那串数字（模型照抄接口字段 `barcode` 得到的）在这里
+   * 隐去——二维码本身就承载同一串数字，正文再摆一遍只会让访客以为要手动输。数字仍可
+   * 通过复制按钮取到，扫不出来时还有退路。
    * @param root - 气泡容器
    */
   function decoratePayCodes(root) {
     if (!root) return
     for (const candidate of payCodeCandidates(root)) {
-      const svg = barcodeSvg(candidate.text)
-      if (svg === '') continue
       const card = document.createElement('div')
       card.className = 'paycode'
       card.dataset.code = candidate.text
       const qr = document.createElement('div')
       qr.className = 'paycode-qr'
-      // 两个码图各配一行小标签，避免访客不知道哪个码给谁用（文案走 i18n）
+      // 一行小标签告诉访客用哪个 App 扫（文案走 i18n）
       qr.title = t('payQrLabel')
       const qrCaption = document.createElement('div')
       qrCaption.className = 'paycode-caption'
       qrCaption.textContent = t('payQrLabel')
-      const bars = document.createElement('div')
-      bars.className = 'paycode-bars'
-      bars.innerHTML = svg
-      const barCaption = document.createElement('div')
-      barCaption.className = 'paycode-caption'
-      barCaption.textContent = t('payBarLabel')
       const copy = document.createElement('button')
       copy.type = 'button'
       copy.className = 'paycode-copy'
@@ -1612,28 +1512,58 @@
       })
       card.appendChild(qr)
       card.appendChild(qrCaption)
-      card.appendChild(bars)
-      card.appendChild(barCaption)
       card.appendChild(copy)
-      if (candidate.splitAt !== undefined) {
-        // 形态③：拆开文本节点，把卡片插在数字之后（数字本身留在正文里）
-        const node = candidate.anchor
-        const after = node.splitText(candidate.splitAt)
-        after.parentNode.insertBefore(card, after)
+      // 把承载数字的那段正文隐去（只留二维码）：卡片插在原位，源码块/行内码随之隐藏。
+      // 用 CSS 隐藏而不是删节点——数字仍在 DOM 里可被复制、也可被辅助技术读到。
+      // 记录「承载数字的节点」，二维码出不来时要把它重新显示出来
+      let hiddenNode = null
+      if (candidate.startAt !== undefined) {
+        // 形态③：数字直接写在句子里。整句不能隐，否则会吞掉「本期應繳…」这类正文，
+        // 因此只把这段数字本身包进不显示的占位，卡片紧随其后。
+        // splitText 两次把这段数字单独切出来：第一次切在数字前、第二次切在数字后，
+        // 留在中间的 `digits` 就是数字本身（要隐的是它，不是它后面的正文）。
+        const digits = candidate.anchor.splitText(candidate.startAt)
+        digits.splitText(candidate.endAt - candidate.startAt)
+        const holder = document.createElement('span')
+        holder.className = 'paycode-src'
+        digits.parentNode.replaceChild(holder, digits)
+        holder.appendChild(digits)
+        holder.insertAdjacentElement('afterend', card)
+        hiddenNode = holder
       } else {
+        candidate.anchor.classList.add('paycode-src')
         candidate.anchor.insertAdjacentElement('afterend', card)
         if (candidate.anchor.dataset) candidate.anchor.dataset.paycode = '1'
+        hiddenNode = candidate.anchor
       }
-      // 二维码库到位后补图；失败就把这个槽位留空（CSS 里 :empty 不占位）
+      // 二维码库到位后补图；库不可用或内容编不出码时走退路（显示数字），
+      // 不能让访客面对一个「让我扫码」却没有码的界面。
       loadQrLib()
-        .then(() => { qr.innerHTML = qrSvg(candidate.text) })
-        .catch(() => { /* 库不可用：条码 + 数字照常可用 */ })
+        .then(() => {
+          const qrSource = qrSvg(candidate.text)
+          if (qrSource === '') degradePayCodeCard(qrCaption, hiddenNode)
+          else qr.innerHTML = qrSource
+        })
+        .catch(() => degradePayCodeCard(qrCaption, hiddenNode))
     }
   }
 
   /**
-   * 懒加载二维码库（同源相对路径）。失败返回 null，**条码路径不受影响**：
-   * 付款码的两个码图互相独立，任一库不可用都还有另一个 + 可复制的数字。
+   * 二维码出不来的退路：撤掉「扫这个码」的标签，并把数字重新显示出来。
+   *
+   * 只留一个「用 App 掃碼」的标签却没有任何码，比不给标签更糟——访客会以为界面坏了。
+   * 数字重新可见后，访客至少能看清并手动输入／复制，缴费这件事仍然可完成。
+   * @param caption - 标签元素
+   * @param hidden - 承载数字的节点（撤销它的隐藏类）
+   */
+  function degradePayCodeCard(caption, hidden) {
+    if (caption && caption.parentNode) caption.parentNode.removeChild(caption)
+    if (hidden) hidden.classList.remove('paycode-src')
+  }
+
+  /**
+   * 懒加载二维码库（同源相对路径）。失败时付款码退回「显示数字 + 复制」，
+   * 因此调用方必须吞掉拒绝，不能让码图库的问题冒泡成整块的渲染失败。
    */
   function loadQrLib() {
     if (typeof window.qrcode === 'function') return Promise.resolve(window.qrcode)

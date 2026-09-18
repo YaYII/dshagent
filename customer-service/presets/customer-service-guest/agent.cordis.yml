@@ -76,9 +76,9 @@
         Every node, step, number and image path must come from the knowledge base — never invent steps, quantities or paths to fill a shape. Put the visual right after one sentence of plain-language answer and keep the surrounding text short.
       - LIVE CUSTOMER DATA (公司業務系統): when the visitor asks about a contract or bill — 合約資料 / 賬單 / 電費金額 / 用電量 / 繳費狀態 / 到期日 / 抄錶日期 — do NOT answer from the knowledge base and do NOT say it is out of scope. Use the `lookup_*` tools (測試環境):
         * **第一步永遠是問合約號**：你沒有、也不可以取得訪客名下的合約清單。就像 10086 不會把你的電話號碼念給你聽，而是請你報號、它來核對。所以訪客問「我有哪些合約」「我的賬單幾多錢」時，先禮貌請他提供 10 位合約號（見卡片或賬單上的號碼），**不要猜、不要列舉、不要說『您名下共有 N 張合約』**。
-        * 拿到合約號後：`lookup_contract`(contract_no, lang) 核對該號碼是否屬於本賬戶並取回該合約的收費組別、賬單月份、到期日、用電量、應繳金額、繳費狀態；`lookup_bill`(contract_no, lang) 取回該合約的賬單明細（賬單月份、發出日期、到期日、應繳金額、用電量、繳費狀態、結餘，以及**付款碼 `barcode`**）。lang 用訪客界面語言（zh | en | pt）。
+        * 拿到合約號後：`lookup_contract`(contract_no, lang) 核對該號碼是否屬於本賬戶並取回該合約的收費組別、賬單月份、到期日、用電量、應繳金額、繳費狀態；`lookup_bill`(contract_no, lang) 取回該合約的賬單明細（賬單月份、發出日期、到期日、應繳金額、用電量、繳費狀態、結餘，以及**付款碼 `barcode`**）。付款碼在界面上呈現為二維碼，因此請把它放進圍欄，不要另外用文字重述那串數字。lang 用訪客界面語言（zh | en | pt）。
         * 賬單查詢的 `level` 由系統固定為 5，你不需要也不能自行指定（1 也可用，2／3／4 不要用）。
-        * 回傳若有 `barcode`（付款碼），**必須主動告訴訪客怎麼用**：把這串數字**用 ```barcode 圍欄原樣列出**（前端會渲染成可掃的**二維碼 + 一維條碼**，並附一鍵複製），並提示「**先截圖／保存這個付款碼，再打開微信或支付寶繳費**」（澳門的繳費入口在微信／支付寶內）。同時把應繳金額與到期日一併說清楚，讓訪客一次看懂要交多少、幾時前交。
+        * 回傳若有 `barcode`（付款碼），**必須主動告訴訪客怎麼用**：把這串數字**用 ```barcode 圍欄原樣列出**（前端會把它渲染成一張**二維碼**卡片，並附一鍵複製；訪客看到的只有二維碼，數字不會重複顯示在正文裡），並提示「**用「澳電 CEM」App 掃描這個二維碼繳費**」——本澳的繳費入口是澳電自家的 App，**不要叫訪客用微信／支付寶**。同時把應繳金額與到期日一併說清楚，讓訪客一次看懂要交多少、幾時前交。
         * 兩個工具的回傳只有兩件事：`found`（該號碼是否存在於本賬戶）與**這一個號碼自己的記錄**。它們在設計上就無法列出其他合約，所以你也不可能知道訪客有多少張合約——**絕對不要編造或推測數量**。
         * `found: false` 表示系統查不到這個號碼：請訪客核對號碼是否打錯（10 位數字），或核對是否為本人合約；不要重複重試同一號碼，也不要猜測金額。
         * 金額、日期、用電量一律照抄工具回傳值，不得換算或推測。查到後用簡短文字或表格直接回答（金額與日期務必完整），不要為了配圖而產生空的圖表塊。
@@ -155,8 +155,9 @@
         - meterReadingType
         - gsRemains
         - billType
-        # 付款条码：level=5 才回（实测 level=1 无此字段）。访客可直接拿去缴费，
-        # 是「信息更准确」的主要收益；不给白名单会被裁掉，等于白开 level=5。
+        # 付款条码：level=5 才回（实测 level=1 无此字段）。前端把它渲染成二维码
+        # （澳電 CEM App 扫码缴费），是「信息更准确」的主要收益；不给白名单会被裁掉，
+        # 等于白开 level=5。
         - barcode
     apiLookup:
       - name: contract
