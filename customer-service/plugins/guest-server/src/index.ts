@@ -709,13 +709,30 @@ export function apply(ctx: Context, config: Config): void {
    * Read the guest conversation as a message list for refresh recovery:
    * user messages and their assistant replies, in order, from the durable
    * session log.
+   *
+   * 一轮 = 一问一答，而会话日志里**每个 agent step 都写一条 assistant/message**：
+   * 模型先写「我先查一下」并发出工具调用，拿到结果后再写正式回答。访客界面把整轮
+   * 当成一段连续文字（流式路径把各 step 的 `text-delta` 直接拼起来，`done.reply`
+   * 也是这条拼接线），所以这里必须**按 turn 归并**：同一轮各 step 的正文顺序拼接
+   * 成一条回答。若按 step 逐条下发，刷新会看到「我先查一下」和正式回答两条气泡，
+   * 而断流恢复取到的正是前面那条——访客拿到的「答复」只有一句过渡语，没有金额也
+   * 没有付款码。
+   *
+   * 同时**丢弃没有访客提问的轮**：历史会话里存在「语言说明被当成新消息唤醒新
+   * turn」留下的孤儿回答（同一句「你好」落盘两条不同回答，实测 turn=1 与 turn=2）。
+   * 这类轮里只有 plugin/system 来源的消息，访客从没问过它，因此不属于访客的对话，
+   * 刷新时不得回放——旧记录因此无需迁移即可恢复成「一问一答」。
    * @returns `[{ role, text, blocks?, blockResults?, degradedIds? }]` in chronological order.
    */
   const readHistoryFromLog = async (sessionId: string): Promise<HistoryMessage[]> => {
     if (!isGuestSessionId(sessionId)) throw new Error('unknown session')
     const snapshot = await ctx.sessionQuery.readSession(sessionId as never)
     const events = (snapshot as unknown as { events: Array<Record<string, unknown>> }).events ?? []
-    const messages: HistoryMessage[] = []
+    // 先归并出「每条访客可见消息」的**原文**，门禁统一在归并之后跑一次：流式出口
+    // 也是按整轮拼接后才过门禁，同一份原文走同一份判定，刷新与当轮终态才一致。
+    const drafts: Array<{ role: 'user' | 'assistant'; text: string }> = []
+    const answerIndexByTurn = new Map<number, number>()
+    let pendingVisitorQuestion = false
     for (const ev of events) {
       if (ev.type === 'user/message') {
         const data = ev.data as { content?: Array<{ type?: string; text?: string }>; source?: { kind?: string } } | undefined
@@ -725,19 +742,43 @@ export function apply(ctx: Context, config: Config): void {
           .filter(b => b.type === 'text' && typeof b.text === 'string')
           .map(b => b.text as string)
           .join('')
-        if (text.length > 0) messages.push({ role: 'user', text })
+        if (text.length > 0) {
+          drafts.push({ role: 'user', text })
+          pendingVisitorQuestion = true
+        }
       } else if (ev.type === 'assistant/message') {
-        const data = ev.data as { message?: { content?: Array<{ type?: string; text?: string }> } } | undefined
+        const data = ev.data as { turn?: number; message?: { content?: Array<{ type?: string; text?: string }> } } | undefined
         const raw = (data?.message?.content ?? [])
           .filter(b => b.type === 'text' && typeof b.text === 'string')
           .map(b => b.text as string)
           .join('')
         if (raw.length === 0) continue
-        // 落盘的回答是模型原文（可能含围栏），重放前必须重新过门禁：判定与当轮同一份代码，
-        // 因此终态一致；坏块的源码在这里被摘除，不会被刷新"重新暴露"。
-        const gated = await gateFullReply(sessionId, raw, undefined, '')
-        messages.push({ role: 'assistant', text: gated.reply, blocks: gated.blocks, blockResults: gated.blockResults, degradedIds: gated.degradedIds })
+        // 无 turn 字段（更早的日志格式）时无从判断归属，一律照收——宁可再生一条，
+        // 也不能把真实回答丢掉。
+        const turn = typeof data?.turn === 'number' ? data.turn : undefined
+        const existing = turn === undefined ? undefined : answerIndexByTurn.get(turn)
+        if (existing !== undefined) {
+          drafts[existing]!.text += raw
+          continue
+        }
+        if (turn !== undefined) {
+          if (!pendingVisitorQuestion) continue // 孤儿轮：访客没问过这一轮
+          pendingVisitorQuestion = false
+        }
+        drafts.push({ role: 'assistant', text: raw })
+        if (turn !== undefined) answerIndexByTurn.set(turn, drafts.length - 1)
       }
+    }
+    const messages: HistoryMessage[] = []
+    for (const draft of drafts) {
+      if (draft.role === 'user') {
+        messages.push({ role: 'user', text: draft.text })
+        continue
+      }
+      // 落盘的回答是模型原文（可能含围栏），重放前必须重新过门禁：判定与当轮同一份代码，
+      // 因此终态一致；坏块的源码在这里被摘除，不会被刷新"重新暴露"。
+      const gated = await gateFullReply(sessionId, draft.text, undefined, '')
+      messages.push({ role: 'assistant', text: gated.reply, blocks: gated.blocks, blockResults: gated.blockResults, degradedIds: gated.degradedIds })
     }
     return messages
   }
@@ -857,7 +898,9 @@ export function apply(ctx: Context, config: Config): void {
           }
           try {
             const messages = await readHistory(sessionId)
-            sendJson(res, 200, { sessionId, messages })
+            // `active` 告诉恢复中的访客端「这一轮还在跑」：此时日志里可能只有过渡语，
+            // 把它当成最终答复会让访客看到一句「我先查一下」就结束。客户端据此继续轮询。
+            sendJson(res, 200, { sessionId, messages, active: activeTurns.has(sessionId) })
           } catch {
             sendJson(res, 404, { error: 'session not found' })
           }

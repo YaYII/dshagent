@@ -148,21 +148,53 @@ for(const l of lines.slice(0,3))console.log(l.slice(0,200));
 
 ## 4. 自动化回归（改代码后跑）
 
-从仓库根目录执行（`tsx` 解析 workspace 包）：
+### 4.1 在容器里跑（需要 workspace 依赖的那几套）
+
+这些套件 import `@deepseek-ai/cordis` / `jsdom`，宿主仓库没装全依赖，在容器里跑：
 
 ```sh
-cd /home/as-workstation01/Documents/project/dshagent
-
-node --import tsx/esm customer-service/plugins/output-gate/tests/gate-check.mjs        # 76
-node --import tsx/esm customer-service/plugins/output-gate/tests/http-exits-check.mjs  # 25
-node --import tsx/esm customer-service/web/guest/tests/output-gate-check.mjs           # 65
-
-# 浏览器 DOM 套件（Playwright 装在同级 Chrome 目录）
-cd /home/as-workstation01/Documents/project/Chrome
-node /home/as-workstation01/Documents/project/dshagent/customer-service/web/guest/tests/gate-dom-check.mjs  # 94
+docker exec dshagent-app sh -c 'cd /app &&
+  node --import tsx/esm customer-service/plugins/output-gate/tests/gate-check.mjs &&        # 76
+  node --import tsx/esm customer-service/plugins/output-gate/tests/http-exits-check.mjs &&  # 28
+  node --import tsx/esm customer-service/plugins/api-client/tests/lookup-check.mjs &&       # 34
+  node customer-service/web/guest/tests/output-gate-check.mjs &&                            # 65（assets 是 CJS，别加 tsx）
+  node customer-service/web/guest/tests/gate-dom-check.mjs'                                 # 104（jsdom 真页面）
 ```
 
-四套件合计 **260** 项断言，全过才算改动可信。
+改了测试文件但不想整组重建镜像时，直接拷进去（秒级）：
+
+```sh
+docker cp customer-service/web/guest/tests/gate-dom-check.mjs \
+  dshagent-app:/app/customer-service/web/guest/tests/gate-dom-check.mjs
+```
+
+### 4.2 在宿主跑（Playwright / 真实对话）
+
+在 `Chrome` 目录下执行（Playwright 装在那里），需要容器在跑、且模型可用：
+
+```sh
+cd /home/as-workstation01/Documents/project/Chrome
+D=/home/as-workstation01/Documents/project/dshagent
+
+node $D/customer-service/plugins/guest-server/tests/duplicate-turn-check.mjs  # 16 一问一答 + 多步轮历史归并
+node $D/customer-service/web/guest/tests/paycode-check.mjs                    # 22 付款码：解码还原 + 静区/模块 + 刷新重放
+node $D/customer-service/web/guest/tests/html-frame-check.mjs                 # 10 HTML 预览按内容自适应
+node $D/customer-service/web/guest/tests/ui-audit.mjs                         # 对比度/溢出/中文行宽 + 截图
+```
+
+八套件合计 **355** 项断言，全过才算改动可信。
+
+### 4.3 判据怎么选的（两条硬规矩）
+
+1. **能独立复算的，绝不调用被测代码复算自己。** 付款码条码不能只断言「图出来了」——
+   编码错了不会报错，只会让访客扫出**错误的数字**，比不显示更糟。因此
+   `paycode-check.mjs` 从渲染出的 SVG 里把条空读回来、按 Code128 规范解码，再与
+   **业务系统接口**当前返回的付款码逐字比对（期望值也是现取的，不是写死的）。
+2. **一条渲染异常不得吃掉访客的答案。** 正文渲染串在整轮的 try 里，任何渲染异常
+   都会被当成「断流」；恢复路径再抛一次就没人接了，气泡永远停在「正在恢复」。
+   所以逐帧入口包了 `safeRenderStream`（抛错退化为纯文本），判据按行宽/块数断言，
+   不按「必须抛错」断言。历史上真踩过：一行写错变量名（`fence.lang` 用了外层必为
+   null 的 `fence`），任何普通代码块都会让整轮回答消失。
 
 ---
 
@@ -180,6 +212,9 @@ node /home/as-workstation01/Documents/project/dshagent/customer-service/web/gues
 | Admin 里点工作区/预设没反应、不出现输入框 | 没有注册工作区（新建会话必须有工作区）。见 §2.2 添加一个；工作区存在 `dsh-home` 卷里，重启不丢 |
 | Admin 提示 "dsh web authentication required" | 点的是容器内地址（`127.0.0.1:3080`），或 token 过期。跑 `bash customer-service/deploy/admin-url.sh` 拿新链接 |
 | 想换客服的底层模型 / 换免费模型 | `bash customer-service/deploy/model.sh list\|current\|free\|paid`，**立即生效不用重启**。见 `docs/model-management.md` |
+| 刷新后同一句问话出现两条回答（或回答只有一句「我先查一下」） | 历史投影必须**按 turn 归并**：一个 agent step 一条 `assistant/message`，且旧记录里还有「语言说明唤醒新 turn」留下的孤儿回答。查 `docs`→`guest-server/src/index.ts` 的 `readHistoryFromLog`；回归用 `duplicate-turn-check.mjs` 的 F/G/H 段 |
+| 付款码出来了但扫不出来 / 扫出来数字不对 | 条码编码错不会报错，只会让访客缴错费。跑 `paycode-check.mjs`（从 SVG 反解数字并与接口比对）；静区必须 ≥10 模块、模块 ≥2px |
+| 回答只显示「网络不稳定，正在为您恢复回答…」一直不动 | 走的是断流恢复路径：说明流式中**渲染抛异常**被当成了断流，或恢复端拿不到 `active=false` 的终态。看浏览器控制台的 `pageerror` 栈（`renderMarkdown` / `renderStreamMarkdown`） |
 
 排错时开容器日志实时看：
 

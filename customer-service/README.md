@@ -59,6 +59,18 @@ docker compose up -d --build
 完整交付材料（含已知权衡、未验证项、回滚路径）见
 [docs/output-self-review-delivery.md](docs/output-self-review-delivery.md)。
 
+## 访客对话
+
+- **一问一答**：会话日志里每个 agent step 各写一条 `assistant/message`（模型先写一句过渡语
+  并发起工具调用，拿到结果再写正式回答），但访客界面把整轮当一段文字。`/history` 归并
+  **同一 turn** 的各 step、丢弃**没有访客提问的 turn**，因此刷新后是一问一答，断流恢复也
+  不会把过渡语当成最终答复。旧记录无需迁移即可恢复。
+- **缴费付款码**：账单查询用 `level=5` 取回 `barcode`。模型把付款码放进 ` ```barcode ` 围栏，
+  前端渲染成 **Code128 一维条码卡片**（白底黑条、两侧静区各 10 模块、模块 2px）+ 一键复制。
+  编码错了不会报错、只会让访客缴错费，所以验收判据是**从渲染出的 SVG 反解数字**并与业务
+  系统接口逐字比对（`web/guest/tests/paycode-check.mjs`）。数字始终同时以文本显示，方便
+  直接粘贴到微信／支付宝的缴费入口。
+
 ## 目录
 
 - `design.md` — 改造设计（裁剪清单 / 架构 / 验收标准）

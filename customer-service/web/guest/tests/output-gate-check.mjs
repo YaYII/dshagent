@@ -344,7 +344,7 @@ function readI18nValue(lang, key) {
 console.log('\n页面接线与源码回退消除')
 check('普通代码块仍原样透传（N2③ 行为级判据，不引用变量名/分支名）', () => {
   // 行为级判据：把一段普通代码块喂进真实 renderMarkdown，断言
-  // ① 产出唯一一处 <pre><code>；② 代码体**逐字**保留（含未闭合情形）。
+  // ① 产出唯一一处代码块元素；② 代码体**逐字**保留（含未闭合情形）。
   // 该断言不引用任何分支名/变量名，因此重构不会让它失效（区别于结构锚点）。
   const fnStart = page.indexOf('function renderMarkdown(')
   const fnEnd = page.indexOf('\n  /**', fnStart + 10)
@@ -352,13 +352,14 @@ check('普通代码块仍原样透传（N2③ 行为级判据，不引用变量�
   const src = page.slice(fnStart, fnEnd)
   // 逐字透传的证据：块体经 esc() 原样拼接（而非按行丢弃/改写）
   assert.ok(/\$\{esc\(buf\.join\('\\n'\)\)\}/.test(src), '块体必须整体 esc 后原样拼接')
-  // 且该产出是本函数内唯一一处 <pre><code>
-  const emissions = [...src.matchAll(/<pre><code>/g)]
+  // 且该产出是本函数内唯一一处代码块元素。判据允许 `<pre>` 带属性（`data-lang`
+  // 是付款码识别的依据）：属性是同一个产出处的修饰，不是第二处产出。
+  const emissions = [...src.matchAll(/<pre[^>]*><code>/g)]
   assert.equal(emissions.length, 1, `renderMarkdown 内只应有一处 pre>code，实际 ${emissions.length}`)
 })
 check('页面只剩一处 pre > code —— 普通代码块（四处源码回退已消除）', () => {
   // 页面上唯一允许的块体源码输出是普通代码块（python/bash 等，N2③ 明确不改行为）
-  const emissions = [...page.matchAll(/<pre><code>[^`]*<\/code><\/pre>`/g)]
+  const emissions = [...page.matchAll(/<pre[^>]*><code>[^`]*<\/code><\/pre>`/g)]
   assert.equal(emissions.length, 1, `只应剩普通代码块一处，实际 ${emissions.length} 处`)
   const at = emissions[0].index
   const around = page.slice(Math.max(0, at - 1200), at + 200)
@@ -691,13 +692,18 @@ check('F-2：渲染器加载失败后本轮不再重试（否则单轮 404 请�
 check('兜底必须是「每帧」而非「只在 done」——否则流式期裸奔明文围栏（SRC5/V1）', () => {
   // 旧后端把围栏分帧下发：若只在 done 才解析，中间帧的正文就是明文围栏。
   // 页面用 renderStreamMarkdown 逐帧渲染，围栏分支逐帧产出占位，因此不裸奔。
+  // 逐帧入口外层还有一层 safeRenderStream（渲染抛错时退化为纯文本，见下一条），
+  // 两帧都必须经它——否则一条渲染异常就会让访客连答案都拿不到。
   assert.ok(/function renderStreamMarkdown\(src, options = \{\}\)/.test(page), '流式渲染入口必须存在')
   assert.ok(/return renderMarkdown\(src\)/.test(page), '流式渲染必须走 renderMarkdown（含围栏分支）')
-  // 每帧调用点：delta 分支与 done 定稿都经 renderStreamMarkdown
+  const safeFn = page.slice(page.indexOf('function safeRenderStream('), page.indexOf('function startClosedGates('))
+  assert.ok(/renderStreamMarkdown\(src, options\)/.test(safeFn), 'safeRenderStream 必须仍走 renderStreamMarkdown（不是另写一份渲染）')
+  assert.ok(/catch/.test(safeFn), 'safeRenderStream 必须只在本帧渲染抛错时退化')
+  // 每帧调用点：delta 分支与 done 定稿都经 safeRenderStream
   const delta = page.slice(page.indexOf("} else if (event === 'delta'"), page.indexOf("} else if (event === 'sources'"))
-  assert.ok(/renderStreamMarkdown\(streamed\)/.test(delta), 'delta 每帧都必须过围栏分支')
+  assert.ok(/safeRenderStream\(streamed\)/.test(delta), 'delta 每帧都必须过围栏分支')
   const doneBranch = page.slice(page.indexOf("} else if (event === 'done')"), page.indexOf("} else if (event === 'error')"))
-  assert.ok(/renderStreamMarkdown\(streamed, \{ final: true \}\)/.test(doneBranch), 'done 定稿同样过围栏分支')
+  assert.ok(/safeRenderStream\(streamed, \{ final: true \}\)/.test(doneBranch), 'done 定稿同样过围栏分支')
   // 兜底分支的注释必须点明「仅服务旧后端」，供 t6 审「是否第二事实源」
   assert.ok(/仅服务旧后端/.test(page), '兜底分支必须有「仅服务旧后端」注释')
 })
@@ -721,8 +727,8 @@ check('P5 计时起点：块闭合即开判（不得全部堆到 done），且�
   assert.ok(/startClosedGates\(bubble\)/.test(deltaBranch), 'delta 分支必须启动已闭合块的判定（P5）')
   // ② 打字机每帧 innerHTML 重渲染会销毁在飞的 img/mermaid：必须走 paintStream 搬运状态
   assert.ok(/function paintStream\(root, html\)/.test(page), '必须有 paintStream 承接重渲染')
-  assert.ok(/paintStream\(bubble, renderStreamMarkdown\(streamed\)\)/.test(page), 'delta 重渲染必须走 paintStream')
-  assert.ok(/paintStream\(bubble, renderStreamMarkdown\(streamed, \{ final: true \}\)\)/.test(page),
+  assert.ok(/paintStream\(bubble, safeRenderStream\(streamed\)\)/.test(page), 'delta 重渲染必须走 paintStream')
+  assert.ok(/paintStream\(bubble, safeRenderStream\(streamed, \{ final: true \}\)\)/.test(page),
     'done 定稿重渲染也必须走 paintStream（否则在飞的块被清掉）')
   // ③ 搬运必须用**真节点**：cloneNode 会造出新 img，请求与 load 监听一起丢
   const paintFn = page.slice(page.indexOf('function paintStream'), page.indexOf('function finalizeHistoryGates'))
@@ -825,7 +831,7 @@ check('门禁预算来自服务端下发，前端只留兜底默认（G1）', ()
 check('文字流式与来源引用未被门禁接管（N3/REG1/REG4）', () => {
   // 正文仍逐帧整体重渲染（打字机语义不变），只有图形块换成占位
   assert.ok(/streamed \+= data\.text/.test(page))
-  assert.ok(/bubble\.innerHTML = renderStreamMarkdown\(streamed\)/.test(page))
+  assert.ok(/bubble\.innerHTML = safeRenderStream\(streamed\)/.test(page))
   assert.ok(/src\.className = 'sources'/.test(page), '来源引用仍在')
 })
 check('图片阅读器与 HTML 沙箱属性未被破坏（REG7/REG8）', () => {

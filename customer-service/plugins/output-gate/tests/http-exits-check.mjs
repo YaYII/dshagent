@@ -42,9 +42,10 @@ async function check(name, body) {
  * 搭一套真实 HTTP 环境：真实 node:http 服务器 + 真实 guest-server 路由 + 桩模型层。
  * @param {string} reply - 桩助手回答（可含围栏）
  * @param {string[]} frames - 桩回答的流式分帧（省略则按整段一帧）
+ * @param {{ events?: Array<Record<string, unknown>> }} [options] - 覆盖会话日志事件（默认一问一答）
  * @returns 环境句柄
  */
-async function boot(reply, frames) {
+async function boot(reply, frames, options = {}) {
   const ctx = new Context()
   const warnings = []
   ctx.logger.warn = (...args) => { warnings.push(args.map(String).join(' ')) }
@@ -83,7 +84,7 @@ async function boot(reply, frames) {
   ctx.provide('webServer', webServer)
 
   // ── 桩：会话与助手回答 ──
-  const events = () => [
+  const events = () => options.events ?? [
     { type: 'user/message', data: { content: [{ type: 'text', text: '你好' }], source: { kind: 'user' } } },
     { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: reply }] } } },
   ]
@@ -274,6 +275,80 @@ await check('GET /api/guest/history：重放同样净化，与当轮终态一致
     assert.equal(assistant[0].blocks.length, 4, 'history 必须回放同一批结构化块')
     assert.equal(assistant[0].text.includes('flowchart'), false)
     assert.equal(assistant[0].degradedIds.length, 1, '降级结论随历史一起回放（E4）')
+  } finally {
+    await env.close()
+  }
+})
+
+await check('GET /api/guest/history：一个多步轮只回一条完整回答（按 turn 归并）', async () => {
+  // 真实的一轮查账单有两个 agent step：先写过渡语并发出工具调用，拿到结果再写正式
+  // 回答——日志里就是两条 assistant/message。访客界面把整轮当一段连续文字，历史也
+  // 必须归并，否则刷新出现两条气泡，而断流恢复会取到前面那句过渡语当成最终答复。
+  const STEP1 = '我先查一下。'
+  const STEP2 = '應繳金額 MOP 30.00。\n\n```mermaid\nflowchart TD\n  A[繳費] --> B[完成]\n```\n'
+  const env = await boot('', undefined, {
+    events: [
+      { type: 'turn/start', data: { turn: 1 } },
+      { type: 'user/message', data: { content: [{ type: 'text', text: '今期要交幾錢？' }], source: { kind: 'user' } } },
+      { type: 'assistant/message', data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: STEP1 }] } } },
+      { type: 'assistant/message', data: { turn: 1, step: 2, message: { content: [{ type: 'text', text: STEP2 }] } } },
+    ],
+  })
+  try {
+    const body = JSON.parse((await env.request(`/api/guest/history?sessionId=${SESSION_ID}`)).text)
+    const assistants = body.messages.filter(message => message.role === 'assistant')
+    assert.equal(assistants.length, 1, `一轮只应有一条回答，实际 ${assistants.length} 条`)
+    assert.ok(assistants[0].text.includes(STEP1), '各 step 的正文都要保留（与流式拼接一致）')
+    assert.ok(assistants[0].text.includes('30.00'), '正式回答必须在内，不能只剩过渡语')
+    assert.equal(assistants[0].blocks.length, 1, '归并后的整段原文统一过门禁：图形块仍被摘出')
+    assert.equal(assistants[0].text.includes('flowchart'), false, '块体源码不得回放')
+    assertNoFenceLeak((await env.request(`/api/guest/history?sessionId=${SESSION_ID}`)).text, '/history 原始报文')
+  } finally {
+    await env.close()
+  }
+})
+
+await check('GET /api/guest/history：跨轮不得并成一条（归并且仅归并同一 turn）', async () => {
+  const env = await boot('', undefined, {
+    events: [
+      { type: 'user/message', data: { content: [{ type: 'text', text: '甲问' }], source: { kind: 'user' } } },
+      { type: 'assistant/message', data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: '甲答' }] } } },
+      { type: 'user/message', data: { content: [{ type: 'text', text: '乙问' }], source: { kind: 'user' } } },
+      { type: 'assistant/message', data: { turn: 2, step: 1, message: { content: [{ type: 'text', text: '乙答' }] } } },
+    ],
+  })
+  try {
+    const body = JSON.parse((await env.request(`/api/guest/history?sessionId=${SESSION_ID}`)).text)
+    const assistants = body.messages.filter(message => message.role === 'assistant')
+    assert.equal(assistants.length, 2, '两轮必须仍是两条回答')
+    assert.ok(assistants[0].text.includes('甲答'), `第一条应为甲答，实际 ${assistants[0].text}`)
+    assert.ok(assistants[1].text.includes('乙答'), `第二条应为乙答，实际 ${assistants[1].text}`)
+    assert.equal(body.active, false, '空闲会话的 active 必须为 false')
+  } finally {
+    await env.close()
+  }
+})
+
+await check('GET /api/guest/history：丢弃没有访客提问的轮（旧记录的孤儿重复回答）', async () => {
+  // 旧实现把语言说明用 followup 注入，唤醒了一个**新 turn**：同一句「你好」落盘
+  // 两条不同回答（turn=1 与 turn=2），而 turn=2 里只有 plugin 来源的消息——访客
+  // 从没问过它。历史不得回放这种孤儿轮，否则刷新后访客看到两条回答。
+  const env = await boot('', undefined, {
+    events: [
+      { type: 'turn/start', data: { turn: 1 } },
+      { type: 'user/message', data: { content: [{ type: 'text', text: '你好' }], source: { kind: 'user' } } },
+      { type: 'assistant/message', data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: '第一次回答' }] } } },
+      { type: 'turn/start', data: { turn: 2 } },
+      { type: 'user/message', data: { content: [{ type: 'text', text: '语言说明' }], source: { kind: 'plugin', plugin: 'guest-server' } } },
+      { type: 'assistant/message', data: { turn: 2, step: 1, message: { content: [{ type: 'text', text: '重复回答' }] } } },
+    ],
+  })
+  try {
+    const body = JSON.parse((await env.request(`/api/guest/history?sessionId=${SESSION_ID}`)).text)
+    const assistants = body.messages.filter(message => message.role === 'assistant')
+    assert.equal(assistants.length, 1, `孤儿轮必须被丢弃，实际剩 ${assistants.length} 条`)
+    assert.ok(assistants[0].text.includes('第一次回答'), '保留的必须是访客问过的那一轮')
+    assert.equal(assistants[0].text.includes('重复回答'), false, '孤儿轮的回答不得回放')
   } finally {
     await env.close()
   }

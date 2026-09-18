@@ -1120,9 +1120,12 @@ await checkAsync('guest-server 已接入三出口 + 回传端点', async () => {
   assert.ok(source.includes("sendEvent('block-open'"), 'SSE 必须下发占位事件')
   assert.ok(source.includes('handleRenderReport'), '必须实现真机回传端点')
   assert.ok(source.includes('gateFullReply'), '非流式与历史出口必须走同一净化函数')
-  const historyIdx = source.indexOf('const gated = await gateFullReply(sessionId, raw')
-  assert.ok(historyIdx > 0, 'history 重放必须重新过门禁')
-  assert.ok(source.indexOf('const gated = await gateFullReply(sessionId, result.reply') > 0, '/chat 出口必须过门禁')
+  // 判据是**调用点数量**而不是某个变量名：`/chat` 出口与 history 重放各需一处，
+  // 少一处就说明有一个出口绕过了门禁。行为级验证在 http-exits-check.mjs
+  // （三出口终态一致）与多步轮历史归并用例里。
+  const gateCallSites = source.match(/await gateFullReply\(/g) ?? []
+  assert.ok(gateCallSites.length >= 2, `非流式出口与 history 重放都必须过门禁，实际只有 ${gateCallSites.length} 处`)
+  assert.ok(source.indexOf('await gateFullReply(sessionId, result.reply') > 0, '/chat 出口必须过门禁')
 })
 
 await checkAsync('组合层：profile 与两张 preset 已装配门禁', async () => {

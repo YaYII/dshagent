@@ -250,7 +250,7 @@ async function main() {
   })
   check('场景①：采样点里没有承载源码的 pre>code（V1/V3）', () => {
     for (const sample of streamSamples) {
-      assert.ok(!/<pre><code>/.test(sample.html), `第 ${sample.frame} 帧出现 pre>code`)
+      assert.ok(!/<pre[^>]*><code>/.test(sample.html), `第 ${sample.frame} 帧出现 pre>code`)
     }
   })
   check('场景①：判定期只呈现 data-block-state 占位/过渡态（V2）', () => {
@@ -443,7 +443,7 @@ async function main() {
     const figure = bubbleGood.querySelector('.kb-image')
     assert.ok(figure, '图片容器存在')
     assert.equal(figure.outerHTML.includes('```'), false, '不得出现围栏分隔符')
-    assert.equal(/<pre><code>/.test(figure.outerHTML), false, '不得残留源码块')
+    assert.equal(/<pre[^>]*><code>/.test(figure.outerHTML), false, '不得残留源码块')
     assert.ok(figure.textContent.includes('澳门电费说明'), '图注必须保留（语义等价正文）')
     // 终态若为 degraded：不得保留未通过校验的 img（D2）
     if (figure.dataset.blockState === 'degraded') {
@@ -513,7 +513,7 @@ async function main() {
     assert.ok(mmd.querySelector('svg'), 'mermaid 终态必须含 SVG')
   })
   check('AS-14④ 多块回答仍无源码泄漏、无 pre>code', () => {
-    assert.equal(/<pre><code>/.test(final14.outerHTML), false)
+    assert.equal(/<pre[^>]*><code>/.test(final14.outerHTML), false)
     assert.equal(final14.outerHTML.includes('```'), false)
     assert.equal(final14.outerHTML.includes('flowchart TD'), false)
   })
@@ -552,7 +552,7 @@ async function main() {
     const html = bubble ? bubble.outerHTML : ''
     const row = {
       renderer: item.renderer,
-      preCode: (html.match(/<pre><code>/g) || []).length,
+      preCode: (html.match(/<pre[^>]*><code>/g) || []).length,
       fenceBackticks: html.includes('```'),
       sourceText: item.body.trim() ? html.includes(item.body.trim()) : false,
       degradedText: bubble ? bubble.textContent.includes(
@@ -767,7 +767,7 @@ async function main() {
       for (const html of samples) {
         assert.equal(html.includes('```'), false, '不得出现围栏分隔符')
         assert.equal(html.includes('flowchart TD'), false, '不得出现块体源码')
-        assert.equal(/<pre><code>/.test(html), false, '不得出现源码块')
+        assert.equal(/<pre[^>]*><code>/.test(html), false, '不得出现源码块')
       }
     })
     booted.window.close()
@@ -817,7 +817,7 @@ async function main() {
       blockHosts: bubble ? bubble.querySelectorAll('.gate-blocks').length : 0,
       svg: bubble ? bubble.querySelectorAll('svg').length : 0,
       leaks: samples.filter(h => h.includes('```') || h.includes('flowchart TD') || h.includes('A[停电]')).length,
-      preCode: samples.filter(h => /<pre><code>/.test(h)).length,
+      preCode: samples.filter(h => /<pre[^>]*><code>/.test(h)).length,
     }
     booted.window.close()
     return result
@@ -943,7 +943,7 @@ async function main() {
         assert.deepEqual(hits, [], `泄漏：${hits.join(' / ')}`)
       })
       check(`③.9b ${item.name}：未过门禁时不得产出 pre>code`, () => {
-        assert.ok(!/<pre><code>/.test(html), '受控围栏不得落到普通代码块')
+        assert.ok(!/<pre[^>]*><code>/.test(html), '受控围栏不得落到普通代码块')
       })
       if (item.keep.length > 0) {
         check(`③.9b ${item.name}：围栏前/后的正文未被吞掉`, () => {
@@ -968,7 +968,7 @@ async function main() {
     const bubble2 = lastBubble(booted2.doc)
     const html2 = bubble2 ? bubble2.outerHTML : ''
     check('③.9b 回归：普通代码块（python）仍原样透传为 pre>code', () => {
-      assert.equal((html2.match(/<pre><code>/g) || []).length, 1, '普通代码块必须保留为 pre>code')
+      assert.equal((html2.match(/<pre[^>]*><code>/g) || []).length, 1, '普通代码块必须保留为 pre>code')
       assert.ok(html2.includes('print(&quot;hello&quot;)') || html2.includes('print("hello")'), '代码体必须原样透传')
       assert.ok(!html2.includes('```'), '围栏符不得上屏')
     })
@@ -1109,7 +1109,7 @@ async function main() {
     const textR = bubbleR ? (bubbleR.textContent || '') : ''
     const htmlR = bubbleR ? bubbleR.outerHTML : ''
     check('③.9c 回归：普通代码块仍逐字透传（N2③，行为级）', () => {
-      assert.equal((htmlR.match(/<pre><code>/g) || []).length, 1, '普通代码块应产出一处 pre>code')
+      assert.equal((htmlR.match(/<pre[^>]*><code>/g) || []).length, 1, '普通代码块应产出一处 pre>code')
       assert.ok(textR.includes('print("hi")') && textR.includes('x = 1'), '代码体必须逐字保留')
       assert.ok(!textR.includes('```'), '围栏符不得上屏')
       assert.ok(textR.includes('说明：') && textR.includes('结束。'), '前后正文不得丢失')
@@ -1161,7 +1161,7 @@ async function main() {
     check('done 定稿：全程无源码泄漏', () => {
       for (const html of samples) {
         assert.equal(html.includes('```'), false)
-        assert.equal(/<pre><code>/.test(html), false)
+        assert.equal(/<pre[^>]*><code>/.test(html), false)
       }
     })
   }
@@ -1529,6 +1529,114 @@ async function main() {
     })
   }
 
+  // ═══ 场景 3.15：缴费付款码卡片（Code128）═══════════════════════════════════
+  // 为什么必须有一条不依赖模型的判据：付款码只在账单查询的回答里出现，而那条回答
+  // 要模型 + 业务系统都在线才能产生。用假 SSE 走**同一条**生产路径（send →
+  // consumeSse → done → finalizeBubble → decoratePayCodes），才能把这段代码钉住。
+  //
+  // 这里只断言结构性事实（卡片、可见数字、data-lang、Code128 的精确模块数）。
+  // 「条码解码回原数字」由 paycode-check.mjs 用权威码表独立解码验证——那条判据需要
+  // 真模型答出付款码，这条不需要，两者互补。
+  console.log('\n③.15 缴费付款码：```barcode 围栏 → 可扫卡片')
+  {
+    const PAY = '720070878510260417000000300002'
+    // Code128 精确模块数：1 起始符 + N/2 数据符 + 1 校验符，各 11 位；STOP 13 位；
+    // 两侧静区各 10 模块。宽度对不上就说明码表/起始符/校验符/静区有一处不对。
+    const expectedModules = 11 * (1 + PAY.length / 2 + 1) + 13 + 20
+
+    const runPay = async (fenceLang) => {
+      const fence = fenceLang === '' ? `\`\`\`\n${PAY}\n\`\`\`` : `\`\`\`${fenceLang}\n${PAY}\n\`\`\``
+      const booted = boot({
+        stream: () => sseResponse([
+          delta(`本期應繳 MOP 30.00。\n\n${fence}\n\n請先截圖再繳費。\n`),
+          `event: done\ndata: ${JSON.stringify({ reply: `本期應繳 MOP 30.00。\n\n${fence}\n\n請先截圖再繳費。\n`, sources: [] })}\n\n`,
+        ], { delayMs: 5 }),
+      })
+      await sleep(80)
+      booted.doc.getElementById('input').value = '付款碼'
+      booted.doc.getElementById('send').click()
+      await sleep(900)
+      const bubble = lastBubble(booted.doc)
+      const doc = booted.doc
+      const card = bubble ? bubble.querySelector('.paycode') : null
+      const svg = card ? card.querySelector('svg') : null
+      const pre = card ? card.previousElementSibling : null
+      const result = {
+        card: card !== null,
+        svg: svg !== null,
+        svgWidth: svg ? Number(svg.getAttribute('width')) : 0,
+        firstBarX: svg ? Number((svg.querySelector('rect[x]') || {}).getAttribute?.('x') ?? 0) : 0,
+        preLang: pre ? pre.getAttribute('data-lang') : null,
+        digitsVisible: bubble ? (bubble.textContent || '').includes(PAY) : false,
+        copyLabel: card && card.querySelector('.paycode-copy') ? card.querySelector('.paycode-copy').textContent : '',
+        html: bubble ? bubble.outerHTML : '',
+        text: bubble ? (bubble.textContent || '') : '',
+      }
+      booted.window.close()
+      return result
+    }
+
+    const flagged = await runPay('barcode')
+    snapshots.paycodeCard = {
+      card: flagged.card, svg: flagged.svg, svgWidth: flagged.svgWidth,
+      firstBarX: flagged.firstBarX, preLang: flagged.preLang,
+      digitsVisible: flagged.digitsVisible, copyLabel: flagged.copyLabel,
+    }
+
+    check('③.15 显式 ```barcode 围栏 → 生成 .paycode 卡片 + SVG', () => {
+      assert.equal(flagged.card, true, '付款码必须渲染成卡片')
+      assert.equal(flagged.svg, true, '卡片里必须有条码 SVG')
+    })
+    check('③.15 pre 带 data-lang="barcode"（识别不靠猜数字形态）', () => {
+      assert.equal(flagged.preLang, 'barcode', `实际 data-lang=${String(flagged.preLang)}`)
+    })
+    check('③.15 条码宽度 == Code128 精确模块数（码表/起始符/校验符/静区全对）', () => {
+      assert.equal(flagged.svgWidth, expectedModules * 2,
+        `宽度应为 ${expectedModules * 2}px（${expectedModules} 模块 × 2px），实际 ${flagged.svgWidth}px`)
+    })
+    check('③.15 左侧静区 ≥10 模块（否则扫描器定位不到起始符）', () => {
+      assert.ok(flagged.firstBarX >= 20, `首条 x=${flagged.firstBarX}px，静区不足`)
+    })
+    check('③.15 付款码数字对访客可见（不能只给图不给数）', () => {
+      assert.equal(flagged.digitsVisible, true, '正文里必须能看到付款码数字')
+    })
+    check('③.15 卡片带复制按钮', () => {
+      assert.ok(flagged.copyLabel.length > 0, '复制按钮必须有文案')
+    })
+    check('③.15 围栏符与围栏语言不上屏', () => {
+      assert.ok(!flagged.text.includes('```'), '围栏符不得上屏')
+      assert.ok(!flagged.text.includes('barcode'), '围栏语言不得作为正文出现在访客眼前')
+    })
+
+    // 兜底路径：模型漏写语言词（``` 后直接给数字）也不能让付款码变成一段死数字。
+    const plain = await runPay('')
+    check('③.15 模型漏写围栏语言：纯数字块仍升级为卡片（兜底）', () => {
+      assert.equal(plain.card, true, '无语言词的纯数字块也应出卡片')
+      assert.equal(plain.svgWidth, expectedModules * 2, '兜底路径的条码宽度必须同样正确')
+    })
+
+    // 反向判据：普通代码块不得被误装饰成付款码。
+    const bootedPlain = boot({
+      stream: () => sseResponse([
+        delta('示例：\n\n```python\nprint(1)\n```\n\n完。\n'),
+        `event: done\ndata: ${JSON.stringify({ reply: '示例：\n\n```python\nprint(1)\n```\n\n完。\n', sources: [] })}\n\n`,
+      ], { delayMs: 5 }),
+    })
+    await sleep(80)
+    bootedPlain.doc.getElementById('input').value = '代码'
+    bootedPlain.doc.getElementById('send').click()
+    await sleep(900)
+    const plainBubble = lastBubble(bootedPlain.doc)
+    const plainHtml = plainBubble ? plainBubble.outerHTML : ''
+    check('③.15 python 代码块不被误装饰为付款码卡片', () => {
+      assert.equal((plainHtml.match(/class="paycode"/g) || []).length, 0, '非付款码内容不得出卡片')
+    })
+    check('③.15 python 代码块照旧透传（render 不抛错，正文不丢）', () => {
+      assert.ok(/<pre[^>]*><code>/.test(plainHtml), '普通代码块必须仍是 pre>code')
+      assert.ok((plainBubble ? plainBubble.textContent : '').includes('示例'), '正文不得因渲染异常丢失')
+    })
+  }
+
   // ═══ 落盘快照与汇总 ═══
   console.log('\n⑤ 快照证据')
   const evidence = {}
@@ -1536,7 +1644,7 @@ async function main() {
     if (typeof html === 'string') {
       evidence[key] = {
         containsFenceBackticks: html.includes('```'),
-        containsPreCode: /<pre><code>/.test(html),
+        containsPreCode: /<pre[^>]*><code>/.test(html),
         containsPendingState: /data-block-state="pending"/.test(html),
         containsDegradedState: /data-block-state="degraded"/.test(html),
         html,
